@@ -1,5 +1,7 @@
 #include "SoundHearingNPC.h"
 
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimationAsset.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -7,11 +9,14 @@
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "NPCHearingComponent.h"
+#include "StealthAIController.h"
 #include "UObject/ConstructorHelpers.h"
 
 ASoundHearingNPC::ASoundHearingNPC()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	AIControllerClass = AStealthAIController::StaticClass();
+	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 
@@ -21,19 +26,22 @@ ASoundHearingNPC::ASoundHearingNPC()
 		GetMesh()->SetSkeletalMesh(MannyMesh.Object);
 	}
 
-	static ConstructorHelpers::FClassFinder<UAnimInstance> MannyAnimBP(TEXT("/Game/Characters/Mannequins/Animations/ABP_Manny"));
-	if (MannyAnimBP.Succeeded())
+	static ConstructorHelpers::FClassFinder<UAnimInstance> MannyAnimBlueprint(TEXT("/Game/Characters/Mannequins/Animations/ABP_Manny"));
+	if (MannyAnimBlueprint.Succeeded())
 	{
-		GetMesh()->SetAnimInstanceClass(MannyAnimBP.Class);
+		GetMesh()->SetAnimInstanceClass(MannyAnimBlueprint.Class);
 	}
 
 	GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
 	GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
-	GetCharacterMovement()->bOrientRotationToMovement = false;
-	GetCharacterMovement()->MaxWalkSpeed = 0.0f;
+	GetCharacterMovement()->bOrientRotationToMovement = true;
+	GetCharacterMovement()->RotationRate = FRotator(0.0f, 420.0f, 0.0f);
+	GetCharacterMovement()->MaxWalkSpeed = PatrolSpeed;
 
 	HearingComponent = CreateDefaultSubobject<UNPCHearingComponent>(TEXT("HearingComponent"));
-	HearingComponent->HearingRadius = 120.0f;
+	HearingComponent->HearingRadius = 220.0f;
+	HearingComponent->ForgetDurationSeconds = 12.0f;
+	HearingComponent->bDrawDebug = false;
 	NPCLabel = FText::FromString(TEXT("NPC"));
 
 	SoundLabel = CreateDefaultSubobject<UTextRenderComponent>(TEXT("SoundLabel"));
@@ -56,7 +64,19 @@ void ASoundHearingNPC::Tick(float DeltaSeconds)
 	}
 
 	const int32 SoundPercent = FMath::RoundToInt(FMath::Clamp(HearingComponent->CurrentSoundStrength, 0.0f, 1.0f) * 100.0f);
-	SoundLabel->SetText(FText::Format(NSLOCTEXT("SoundNPC", "LabeledSoundPercent", "{0}\nSound: {1}%"), NPCLabel, FText::AsNumber(SoundPercent)));
+	const AStealthAIController* StealthController = Cast<AStealthAIController>(GetController());
+	const int32 DetectionPercent = StealthController
+		? FMath::RoundToInt(StealthController->GetDetectionLevel() * 100.0f)
+		: 0;
+	const FText StateName = StealthController
+		? StealthController->GetStateDisplayName()
+		: NSLOCTEXT("StealthAI", "NoController", "NO AI");
+	SoundLabel->SetText(FText::Format(
+		NSLOCTEXT("SoundNPC", "NPCStatus", "{0}\n{1}  Sight: {2}%\nSound: {3}%"),
+		NPCLabel,
+		StateName,
+		FText::AsNumber(DetectionPercent),
+		FText::AsNumber(SoundPercent)));
 
 	const APlayerController* PlayerController = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
 	const APlayerCameraManager* CameraManager = PlayerController ? PlayerController->PlayerCameraManager : nullptr;
@@ -66,10 +86,4 @@ void ASoundHearingNPC::Tick(float DeltaSeconds)
 		SoundLabel->SetWorldRotation(ToCamera.Rotation());
 	}
 
-	if (HearingComponent->HasHeardSound())
-	{
-		const FVector ToSound = HearingComponent->LastHeardPosition - GetActorLocation();
-		const FRotator TargetRotation(0.0f, ToSound.Rotation().Yaw, 0.0f);
-		SetActorRotation(FMath::RInterpTo(GetActorRotation(), TargetRotation, DeltaSeconds, 5.0f));
-	}
 }
