@@ -62,6 +62,7 @@ void UNPCHearingComponent::HearSoundAtLocation(const FVector& SoundLocation, flo
 	RememberedSoundStrength = Strength;
 	CurrentSoundStrength = Strength;
 	TimeSinceLastHeard = 0.0f;
+	++HearingEventId;
 
 	if (bDrawDebug && GetWorld())
 	{
