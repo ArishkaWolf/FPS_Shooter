@@ -5,6 +5,7 @@
 #include "SoundHearingNPC.generated.h"
 
 class UNPCHearingComponent;
+class USkeletalMeshComponent;
 class UTextRenderComponent;
 
 UCLASS()
@@ -14,12 +15,17 @@ class FPS_SHOOTER_API ASoundHearingNPC : public ACharacter
 
 public:
 	ASoundHearingNPC();
+	virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UNPCHearingComponent> HearingComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UTextRenderComponent> SoundLabel;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
+	TObjectPtr<USkeletalMeshComponent> WeaponMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hearing")
 	FText NPCLabel;
@@ -36,6 +42,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Movement", meta=(ClampMin="0.0"))
 	float ChaseSpeed = 430.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat", meta=(ClampMin="1.0"))
+	float MaxHealth = 100.0f;
+
 protected:
 	virtual void Tick(float DeltaSeconds) override;
+
+private:
+	float CurrentHealth = 100.0f;
 };

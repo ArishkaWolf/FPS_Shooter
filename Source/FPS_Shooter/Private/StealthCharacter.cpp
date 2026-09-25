@@ -1,20 +1,25 @@
 #include "StealthCharacter.h"
 
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimSequence.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Engine/Engine.h"
 #include "FallingSoundSphere.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/SpringArmComponent.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "Kismet/GameplayStatics.h"
+#include "Particles/ParticleSystem.h"
 #include "SoundRayEmitterComponent.h"
 #include "StealthInteractable.h"
+#include "Sound/SoundBase.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -38,11 +43,11 @@ AStealthCharacter::AStealthCharacter()
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 	bUseControllerRotationPitch = false;
-	bUseControllerRotationYaw = false;
+	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
 
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
-	Movement->bOrientRotationToMovement = true;
+	Movement->bOrientRotationToMovement = false;
 	Movement->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
 	Movement->JumpZVelocity = 500.0f;
 	Movement->AirControl = 0.35f;
@@ -51,15 +56,23 @@ AStealthCharacter::AStealthCharacter()
 	Movement->GetNavAgentPropertiesRef().bCanCrouch = true;
 	Movement->SetCrouchedHalfHeight(60.0f);
 
-	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
-	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 350.0f;
-	CameraBoom->SocketOffset = FVector(0.0f, 60.0f, 65.0f);
-	CameraBoom->bUsePawnControlRotation = true;
-
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
-	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
-	FollowCamera->bUsePawnControlRotation = false;
+	FollowCamera->SetupAttachment(GetCapsuleComponent());
+	FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 64.0f));
+	FollowCamera->bUsePawnControlRotation = true;
+
+	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
+	FirstPersonArms->SetupAttachment(FollowCamera);
+	FirstPersonArms->SetRelativeLocation(FVector(-30.0f, 0.0f, -150.0f));
+	FirstPersonArms->SetOnlyOwnerSee(true);
+	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonArms->CastShadow = false;
+
+	WeaponMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh"));
+	WeaponMesh->SetupAttachment(FirstPersonArms, TEXT("GripPoint"));
+	WeaponMesh->SetOnlyOwnerSee(true);
+	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponMesh->CastShadow = false;
 
 	SoundEmitter = CreateDefaultSubobject<USoundRayEmitterComponent>(TEXT("SoundEmitter"));
 	SoundEmitter->Volume = WalkFootstepVolume;
@@ -78,6 +91,7 @@ AStealthCharacter::AStealthCharacter()
 		GetMesh()->SetSkeletalMesh(MannyMesh.Object);
 		GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
 		GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+		GetMesh()->SetOwnerNoSee(true);
 	}
 
 	static ConstructorHelpers::FClassFinder<UAnimInstance> MannyAnimBlueprint(TEXT("/Game/Characters/Mannequins/Animations/ABP_Manny"));
@@ -86,7 +100,31 @@ AStealthCharacter::AStealthCharacter()
 		GetMesh()->SetAnimInstanceClass(MannyAnimBlueprint.Class);
 	}
 
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> ArmsMesh(TEXT("/Game/FirstPersonArms/Character/Mesh/SK_Mannequin_Arms.SK_Mannequin_Arms"));
+	if (ArmsMesh.Succeeded())
+	{
+		FirstPersonArms->SetSkeletalMesh(ArmsMesh.Object);
+	}
+
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> GunMesh(TEXT("/Game/FPWeapon/Mesh/SK_FPGun.SK_FPGun"));
+	if (GunMesh.Succeeded())
+	{
+		WeaponMesh->SetSkeletalMesh(GunMesh.Object);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> RifleIdle(TEXT("/Game/FirstPersonArms/Animations/FP_Rifle_Idle.FP_Rifle_Idle"));
+	ArmsIdleAnimation = RifleIdle.Object;
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> RifleRun(TEXT("/Game/FirstPersonArms/Animations/FP_Rifle_Run.FP_Rifle_Run"));
+	ArmsRunAnimation = RifleRun.Object;
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> RifleFire(TEXT("/Game/FirstPersonArms/Animations/FP_Rifle_Fire.FP_Rifle_Fire"));
+	ArmsFireAnimation = RifleFire.Object;
+	static ConstructorHelpers::FObjectFinder<USoundBase> RifleFireSound(TEXT("/Game/FPWeapon/Audio/FirstPersonTemplateWeaponFire02.FirstPersonTemplateWeaponFire02"));
+	FireSound = RifleFireSound.Object;
+	static ConstructorHelpers::FObjectFinder<UParticleSystem> RifleMuzzleFlash(TEXT("/Game/MilitaryWeapSilver/FX/P_AssaultRifle_MuzzleFlash.P_AssaultRifle_MuzzleFlash"));
+	MuzzleFlash = RifleMuzzleFlash.Object;
+
 	NoiseMakerClass = AFallingSoundSphere::StaticClass();
+	AmmoInMagazine = MagazineSize;
 	CreateInputMapping();
 }
 
@@ -94,6 +132,11 @@ void AStealthCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyInputMapping();
+	FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	if (ArmsIdleAnimation)
+	{
+		FirstPersonArms->PlayAnimation(ArmsIdleAnimation, true);
+	}
 }
 
 void AStealthCharacter::PawnClientRestart()
@@ -121,6 +164,18 @@ void AStealthCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateMovementState();
+	UpdateFirstPersonAnimation(DeltaSeconds);
+	TimeUntilNextShot = FMath::Max(0.0f, TimeUntilNextShot - DeltaSeconds);
+	if (bWantsToFire && TimeUntilNextShot <= 0.0f)
+	{
+		FireWeapon();
+	}
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(2402, 0.0f, FColor::White,
+			FString::Printf(TEXT("AMMO %d / %d"), AmmoInMagazine, ReserveAmmo));
+	}
 }
 
 void AStealthCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -135,6 +190,9 @@ void AStealthCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	EnhancedInput->BindAction(CrouchAction, ETriggerEvent::Started, this, &AStealthCharacter::ToggleCrouch);
 	EnhancedInput->BindAction(InteractAction, ETriggerEvent::Started, this, &AStealthCharacter::Interact);
 	EnhancedInput->BindAction(ThrowAction, ETriggerEvent::Started, this, &AStealthCharacter::ThrowNoiseMaker);
+	EnhancedInput->BindAction(FireAction, ETriggerEvent::Started, this, &AStealthCharacter::StartFire);
+	EnhancedInput->BindAction(FireAction, ETriggerEvent::Completed, this, &AStealthCharacter::StopFire);
+	EnhancedInput->BindAction(ReloadAction, ETriggerEvent::Started, this, &AStealthCharacter::ReloadWeapon);
 }
 
 void AStealthCharacter::AddNoiseMakers(int32 Amount)
@@ -184,6 +242,16 @@ void AStealthCharacter::CreateInputMapping()
 	ThrowAction->ValueType = EInputActionValueType::Boolean;
 	InputMappingContext->MapKey(ThrowAction, EKeys::Q);
 	InputMappingContext->MapKey(ThrowAction, EKeys::Gamepad_RightShoulder);
+
+	FireAction = NewObject<UInputAction>(this, TEXT("FireAction"));
+	FireAction->ValueType = EInputActionValueType::Boolean;
+	InputMappingContext->MapKey(FireAction, EKeys::LeftMouseButton);
+	InputMappingContext->MapKey(FireAction, EKeys::Gamepad_RightTrigger);
+
+	ReloadAction = NewObject<UInputAction>(this, TEXT("ReloadAction"));
+	ReloadAction->ValueType = EInputActionValueType::Boolean;
+	InputMappingContext->MapKey(ReloadAction, EKeys::R);
+	InputMappingContext->MapKey(ReloadAction, EKeys::Gamepad_FaceButton_Left);
 }
 
 void AStealthCharacter::Move(const FInputActionValue& Value)
@@ -204,7 +272,7 @@ void AStealthCharacter::Look(const FInputActionValue& Value)
 {
 	const FVector2D LookInput = Value.Get<FVector2D>();
 	AddControllerYawInput(LookInput.X);
-	AddControllerPitchInput(LookInput.Y);
+	AddControllerPitchInput(-LookInput.Y);
 }
 
 void AStealthCharacter::StartSprint()
@@ -264,6 +332,93 @@ void AStealthCharacter::ThrowNoiseMaker()
 		NoiseMaker->SoundEmitter->DebugDrawDuration = 0.0f;
 		NoiseMaker->CollisionComponent->SetPhysicsLinearVelocity(Direction * NoiseMakerThrowSpeed + GetVelocity());
 		--NoiseMakerCount;
+	}
+}
+
+void AStealthCharacter::StartFire()
+{
+	bWantsToFire = true;
+	if (TimeUntilNextShot <= 0.0f)
+	{
+		FireWeapon();
+	}
+}
+
+void AStealthCharacter::StopFire()
+{
+	bWantsToFire = false;
+}
+
+void AStealthCharacter::FireWeapon()
+{
+	if (AmmoInMagazine <= 0)
+	{
+		bWantsToFire = false;
+		return;
+	}
+
+	--AmmoInMagazine;
+	TimeUntilNextShot = FireInterval;
+
+	if (ArmsFireAnimation)
+	{
+		FirstPersonArms->PlayAnimation(ArmsFireAnimation, false);
+		FireAnimationTimeRemaining = ArmsFireAnimation->GetPlayLength();
+		bArmsPlayingRun = GetVelocity().SizeSquared2D() <= FMath::Square(20.0f);
+	}
+	if (MuzzleFlash)
+	{
+		UGameplayStatics::SpawnEmitterAttached(MuzzleFlash, WeaponMesh, TEXT("Muzzle"));
+	}
+	if (FireSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, FireSound, FollowCamera->GetComponentLocation());
+	}
+
+	const float PreviousVolume = SoundEmitter->Volume;
+	SoundEmitter->Volume = 1.6f;
+	SoundEmitter->EmitFootstepSound();
+	SoundEmitter->Volume = PreviousVolume;
+
+	const FVector TraceStart = FollowCamera->GetComponentLocation();
+	const FVector ShotDirection = FollowCamera->GetForwardVector();
+	const FVector TraceEnd = TraceStart + ShotDirection * WeaponRange;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(WeaponFire), true, this);
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, QueryParams) && Hit.GetActor())
+	{
+		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), WeaponDamage, ShotDirection, Hit,
+			GetController(), this, UDamageType::StaticClass());
+	}
+}
+
+void AStealthCharacter::ReloadWeapon()
+{
+	const int32 NeededAmmo = MagazineSize - AmmoInMagazine;
+	const int32 AmmoToLoad = FMath::Min(NeededAmmo, ReserveAmmo);
+	AmmoInMagazine += AmmoToLoad;
+	ReserveAmmo -= AmmoToLoad;
+}
+
+void AStealthCharacter::UpdateFirstPersonAnimation(float DeltaSeconds)
+{
+	if (FireAnimationTimeRemaining > 0.0f)
+	{
+		FireAnimationTimeRemaining = FMath::Max(0.0f, FireAnimationTimeRemaining - DeltaSeconds);
+		return;
+	}
+
+	const bool bShouldPlayRun = GetVelocity().SizeSquared2D() > FMath::Square(20.0f);
+	if (bShouldPlayRun == bArmsPlayingRun)
+	{
+		return;
+	}
+
+	bArmsPlayingRun = bShouldPlayRun;
+	UAnimSequence* Animation = bArmsPlayingRun ? ArmsRunAnimation : ArmsIdleAnimation;
+	if (Animation)
+	{
+		FirstPersonArms->PlayAnimation(Animation, true);
 	}
 }
 

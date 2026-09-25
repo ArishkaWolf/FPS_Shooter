@@ -6,11 +6,14 @@
 #include "StealthCharacter.generated.h"
 
 class AFallingSoundSphere;
+class UAnimSequence;
 class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
+class UParticleSystem;
+class USkeletalMeshComponent;
+class USoundBase;
 class USoundRayEmitterComponent;
-class USpringArmComponent;
 
 UCLASS()
 class FPS_SHOOTER_API AStealthCharacter : public ACharacter
@@ -34,10 +37,13 @@ protected:
 	virtual void BeginPlay() override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
-	TObjectPtr<USpringArmComponent> CameraBoom;
+	TObjectPtr<UCameraComponent> FollowCamera;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
-	TObjectPtr<UCameraComponent> FollowCamera;
+	TObjectPtr<USkeletalMeshComponent> FirstPersonArms;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
+	TObjectPtr<USkeletalMeshComponent> WeaponMesh;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<USoundRayEmitterComponent> SoundEmitter;
@@ -72,6 +78,36 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Inventory")
 	TSubclassOf<AFallingSoundSphere> NoiseMakerClass;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="1"))
+	int32 MagazineSize = 30;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0"))
+	int32 ReserveAmmo = 90;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0.01"))
+	float FireInterval = 0.12f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0.0"))
+	float WeaponDamage = 34.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0.0"))
+	float WeaponRange = 10000.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon")
+	TObjectPtr<UAnimSequence> ArmsIdleAnimation;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon")
+	TObjectPtr<UAnimSequence> ArmsRunAnimation;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon")
+	TObjectPtr<UAnimSequence> ArmsFireAnimation;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon")
+	TObjectPtr<USoundBase> FireSound;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon")
+	TObjectPtr<UParticleSystem> MuzzleFlash;
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> InputMappingContext;
@@ -94,7 +130,18 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ThrowAction;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> FireAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> ReloadAction;
+
 	bool bWantsToSprint = false;
+	bool bWantsToFire = false;
+	float TimeUntilNextShot = 0.0f;
+	float FireAnimationTimeRemaining = 0.0f;
+	int32 AmmoInMagazine = 0;
+	bool bArmsPlayingRun = false;
 
 	void CreateInputMapping();
 	void ApplyInputMapping();
@@ -105,5 +152,10 @@ private:
 	void ToggleCrouch();
 	void Interact();
 	void ThrowNoiseMaker();
+	void StartFire();
+	void StopFire();
+	void FireWeapon();
+	void ReloadWeapon();
 	void UpdateMovementState();
+	void UpdateFirstPersonAnimation(float DeltaSeconds);
 };
