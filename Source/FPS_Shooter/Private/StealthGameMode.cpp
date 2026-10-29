@@ -125,6 +125,7 @@ FString AStealthGameMode::GetObjectiveText() const
 FString AStealthGameMode::GetThreatText() const
 {
 	bool bInvestigating = false;
+	bool bSuspicious = false;
 	for (TActorIterator<AStealthAIController> It(GetWorld()); It; ++It)
 	{
 		if (!IsValid(It->GetPawn()))
@@ -136,9 +137,11 @@ FString AStealthGameMode::GetThreatText() const
 			return TEXT("DETECTED - Guard opening fire. Break line of sight!");
 		}
 		bInvestigating |= It->GetAIState() != EStealthAIState::Patrol;
+		bSuspicious |= It->GetAIState() == EStealthAIState::Suspicious;
 	}
 	return IsPlayerPursued() ? TEXT("SEARCHING - Stay hidden until the search ends.")
-		: bInvestigating ? TEXT("GUARD INVESTIGATING A SOUND")
+		: bSuspicious ? TEXT("GUARD SUSPICIOUS - Keep quiet and stay out of sight.")
+		: bInvestigating ? TEXT("GUARD INVESTIGATING - Stay hidden and quiet.")
 		: TEXT("HIDDEN - Crouch for quiet footsteps. [Q] throws a distraction.");
 }
 
