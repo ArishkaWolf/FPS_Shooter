@@ -3,6 +3,7 @@
 #include "DrawDebugHelpers.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/Controller.h"
 #include "NPCHearingComponent.h"
 
 USoundRayEmitterComponent::USoundRayEmitterComponent()
@@ -53,14 +54,48 @@ bool USoundRayEmitterComponent::ShouldAutoEmitFootstep() const
 
 void USoundRayEmitterComponent::EmitFootstepSound()
 {
+	EmitSoundEvent(ESoundEventType::Footstep);
+}
+
+void USoundRayEmitterComponent::EmitSoundEvent(ESoundEventType Type, float VolumeOverride, float DistanceOverride, AActor* SourceOwner)
+{
+	if (GetOwner()) { EmitSoundEventAtLocation(Type, GetOwner()->GetActorLocation(), VolumeOverride, DistanceOverride, SourceOwner); }
+}
+
+void USoundRayEmitterComponent::EmitSoundEventAtLocation(ESoundEventType Type, FVector Location,
+	float VolumeOverride, float DistanceOverride, AActor* SourceOwner)
+{
 	UWorld* World = GetWorld();
 	AActor* Owner = GetOwner();
-	if (!World || !Owner || RayCount <= 0 || Volume <= 0.0f || MaxDistance <= 0.0f)
+	const float EventVolume = VolumeOverride < 0.0f ? Volume : VolumeOverride;
+	const float RayDistance = DistanceOverride < 0.0f ? MaxDistance : DistanceOverride;
+	if (!World || !Owner || RayCount <= 0 || !FMath::IsFinite(EventVolume) || EventVolume <= 0.0f
+		|| !FMath::IsFinite(RayDistance) || RayDistance <= 0.0f || Location.ContainsNaN())
 	{
 		return;
 	}
 
-	const FVector Origin = Owner->GetActorLocation();
+	FSoundRayEvent Event;
+	Event.EventId = FGuid::NewGuid();
+	Event.Type = Type;
+	Event.Strength = Event.EmittedStrength = EventVolume;
+	Event.SourceLocation = Event.HeardLocation = Event.ArrivalLocation = Location;
+	Event.TimeSeconds = World->GetTimeSeconds();
+	Event.SourceActor = Owner;
+	AActor* ResponsibleActor = IsValid(SourceOwner) ? SourceOwner
+		: Cast<APawn>(Owner) ? Owner
+		: IsValid(Owner->GetInstigator()) ? Owner->GetInstigator()
+		: IsValid(Owner->GetOwner()) ? Owner->GetOwner() : Owner;
+	// A possessed pawn's AActor::Owner is its controller, not the physical sound source.
+	if (AController* SourceController = Cast<AController>(ResponsibleActor); SourceController && SourceController->GetPawn())
+	{
+		ResponsibleActor = SourceController->GetPawn();
+	}
+	Event.SourceOwner = ResponsibleActor;
+	Event.MemoryDuration = ForgetSpeed > KINDA_SMALL_NUMBER ? 1.0f / ForgetSpeed : 60.0f;
+	Event.RayDistance = RayDistance;
+	LastEmittedEvent = Event;
+	const FVector Origin = Location;
 	const FVector Forward = Owner->GetActorForwardVector().GetSafeNormal();
 	const float OwnerYawDegrees = Owner->GetActorRotation().Yaw;
 	const int32 ClampedRayCount = FMath::Max(1, RayCount);
@@ -74,25 +109,26 @@ void USoundRayEmitterComponent::EmitFootstepSound()
 			: FVector(FMath::Cos(FMath::DegreesToRadians(AngleDegrees)), FMath::Sin(FMath::DegreesToRadians(AngleDegrees)), 0.0f);
 		const FVector Direction = FlatDirection.RotateAngleAxis(RayPitchDegrees, FVector::CrossProduct(FVector::UpVector, FlatDirection).GetSafeNormal()).GetSafeNormal();
 
-		TraceSoundRay(Origin, Direction.GetSafeNormal(), Volume, 0);
+		TraceSoundRay(Origin, Direction.GetSafeNormal(), EventVolume, 0, Event, RayDistance);
 	}
 
-	if (bDrawDebug)
+	if (IsSoundRayDebugEnabled())
 	{
 		DrawDebugSphere(World, Origin, 32.0f, 16, FColor::White, false, DebugDrawDuration, 0, 2.5f);
 	}
 }
 
-void USoundRayEmitterComponent::TraceSoundRay(const FVector& RayStart, const FVector& Direction, float StartVolume, int32 ReflectionIndex) const
+void USoundRayEmitterComponent::TraceSoundRay(const FVector& RayStart, const FVector& Direction, float StartVolume, int32 ReflectionIndex,
+	const FSoundRayEvent& Event, float RayDistance) const
 {
 	UWorld* World = GetWorld();
 	AActor* Owner = GetOwner();
-	if (!World || !Owner || StartVolume <= 0.0f || MaxDistance <= 0.0f || ReflectionIndex > MaxReflections)
+	if (!World || !Owner || StartVolume <= 0.0f || RayDistance <= 0.0f || ReflectionIndex > MaxReflections)
 	{
 		return;
 	}
 
-	const FVector TraceEnd = RayStart + Direction * MaxDistance;
+	const FVector TraceEnd = RayStart + Direction * RayDistance;
 
 	FHitResult Hit;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(SoundRayTrace), false, Owner);
@@ -102,9 +138,9 @@ void USoundRayEmitterComponent::TraceSoundRay(const FVector& RayStart, const FVe
 	const float DistanceMeters = FVector::Distance(RayStart, RayEnd) / 100.0f;
 	const float EndVolume = FMath::Max(0.0f, StartVolume - DistanceMeters * AttenuationPerMeter);
 
-	NotifyListenersAlongRay(RayStart, RayEnd, StartVolume, EndVolume);
+	NotifyListenersAlongRay(RayStart, RayEnd, StartVolume, EndVolume, Event, ReflectionIndex);
 
-	if (bDrawDebug)
+	if (IsSoundRayDebugEnabled())
 	{
 		const FColor RayColor = bHit ? FColor::Orange : FColor::Yellow;
 		DrawDebugLine(World, RayStart, RayEnd, RayColor, false, DebugDrawDuration, 0, 2.0f + ReflectionIndex);
@@ -124,10 +160,11 @@ void USoundRayEmitterComponent::TraceSoundRay(const FVector& RayStart, const FVe
 
 	const FVector ReflectedDirection = FMath::GetReflectionVector(Direction, Hit.ImpactNormal).GetSafeNormal();
 	const FVector ReflectedStart = Hit.ImpactPoint + ReflectedDirection * 4.0f;
-	TraceSoundRay(ReflectedStart, ReflectedDirection, ReflectedVolume, ReflectionIndex + 1);
+	TraceSoundRay(ReflectedStart, ReflectedDirection, ReflectedVolume, ReflectionIndex + 1, Event, RayDistance);
 }
 
-void USoundRayEmitterComponent::NotifyListenersAlongRay(const FVector& RayStart, const FVector& RayEnd, float StartVolume, float EndVolume) const
+void USoundRayEmitterComponent::NotifyListenersAlongRay(const FVector& RayStart, const FVector& RayEnd, float StartVolume, float EndVolume,
+	const FSoundRayEvent& Event, int32 ReflectionIndex) const
 {
 	UWorld* World = GetWorld();
 	if (!World)
@@ -145,7 +182,7 @@ void USoundRayEmitterComponent::NotifyListenersAlongRay(const FVector& RayStart,
 	for (const TWeakObjectPtr<UNPCHearingComponent>& ListenerPtr : UNPCHearingComponent::GetRegisteredComponents())
 	{
 		UNPCHearingComponent* Listener = ListenerPtr.Get();
-		if (!Listener || Listener->GetWorld() != World || Listener->GetOwner() == GetOwner())
+		if (!Listener || !Listener->IsActive() || Listener->GetWorld() != World || Listener->GetOwner() == GetOwner())
 		{
 			continue;
 		}
@@ -161,6 +198,11 @@ void USoundRayEmitterComponent::NotifyListenersAlongRay(const FVector& RayStart,
 		{
 			continue;
 		}
+		// A hearing radius must not let a listener on the far side of a wall hear through it.
+		FHitResult OcclusionHit;
+		FCollisionQueryParams HearingParams(SCENE_QUERY_STAT(SoundRayArrival), false, GetOwner());
+		HearingParams.AddIgnoredActor(Listener->GetOwner());
+		if (World->LineTraceSingleByChannel(OcclusionHit, ClosestPoint, ListenerLocation, ECC_Visibility, HearingParams)) { continue; }
 
 		const float ReachedVolume = FMath::Lerp(StartVolume, EndVolume, Alpha);
 		if (ReachedVolume <= 0.0f)
@@ -168,9 +210,11 @@ void USoundRayEmitterComponent::NotifyListenersAlongRay(const FVector& RayStart,
 			continue;
 		}
 
-		// Use the closest point on the simulated ray as the heard position so AI can react to where the sound arrived.
-		Listener->ForgetSpeed = ForgetSpeed;
-		Listener->ForgetDurationSeconds = ForgetSpeed > KINDA_SMALL_NUMBER ? 1.0f / ForgetSpeed : 60.0f;
-		Listener->HearSoundAtLocation(ClosestPoint, ReachedVolume);
+		FSoundRayEvent Received = Event;
+		Received.Strength = ReachedVolume;
+		Received.HeardLocation = RayStart;
+		Received.ArrivalLocation = ClosestPoint;
+		Received.ReflectionCount = ReflectionIndex;
+		Listener->HearSoundEvent(Received);
 	}
 }

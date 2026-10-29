@@ -71,6 +71,8 @@ public:
 	float GetAimAlpha() const { return AimAlpha; }
 	float GetShotAnimationAge() const;
 	float GetLastLandingStrength() const { return LastLandingStrength; }
+	USoundRayEmitterComponent* GetSoundEmitter() const { return SoundEmitter; }
+	USoundBase* GetLandingSound() const { return LandingSound; }
 	UAnimSequence* GetArmsIdleAnimation() const { return ArmsIdleAnimation; }
 	UAnimSequence* GetArmsRunAnimation() const { return ArmsRunAnimation; }
 	UAnimSequence* GetArmsFireAnimation() const { return ArmsFireAnimation; }
@@ -112,6 +114,21 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="0.0"))
 	float CrouchFootstepVolume = 0.12f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="1.0"))
+	float CrouchFootstepDistance = 400.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="1.0"))
+	float WalkFootstepDistance = 1000.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="1.0"))
+	float SprintFootstepDistance = 1800.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="0.0"))
+	float GunshotVolume = 1.6f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="1.0"))
+	float GunshotDistance = 3000.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="1.0"))
+	float SoftLandingDistance = 400.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="1.0"))
+	float HardLandingDistance = 1800.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Interaction", meta=(ClampMin="0.0"))
 	float InteractionDistance = 300.0f;

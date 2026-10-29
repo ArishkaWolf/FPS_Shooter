@@ -10,6 +10,8 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Paths.h"
 #include "SoundHearingNPC.h"
+#include "SoundRayEmitterComponent.h"
+#include "FallingSoundSphere.h"
 #include "StealthAIController.h"
 #include "StealthArmsAnimInstance.h"
 #include "StealthCharacter.h"
@@ -111,6 +113,7 @@ public:
 		case 5:
 			Test->TestEqual(TEXT("Moving arms enter run"), Player->GetArmsState(), EStealthArmsState::Run);
 			Test->TestEqual(TEXT("Sprint speed restored"), Player->GetCharacterMovement()->MaxWalkSpeed, 650.0f);
+			Test->TestTrue(TEXT("Automatic footsteps retain player source owner"), Player->GetSoundEmitter()->GetLastEmittedEvent().SourceOwner == Player);
 			Key(EKeys::W, false); Key(EKeys::LeftShift, false); Tap(EKeys::C);
 			break;
 		case 6:
@@ -126,6 +129,8 @@ public:
 			break;
 		case 8:
 			Test->TestTrue(TEXT("Held fire consumes rounds"), Player->GetAmmoInMagazine() < 30);
+			Test->TestEqual(TEXT("Player shots use Gunshot events"), Player->GetSoundEmitter()->GetLastEmittedEvent().Type, ESoundEventType::Gunshot);
+			Test->TestTrue(TEXT("Gunshot owner is the player"), Player->GetSoundEmitter()->GetLastEmittedEvent().SourceOwner == Player);
 			Test->TestEqual(TEXT("Firing arms state"), Player->GetArmsState(), EStealthArmsState::Fire);
 			Key(EKeys::LeftMouseButton, false);
 			AmmoBeforeReload = Player->GetAmmoInMagazine();
@@ -162,6 +167,18 @@ public:
 			}
 			break;
 		case 12:
+		{
+			bool bThrownImpactObserved = false;
+			for (TActorIterator<AFallingSoundSphere> It(World); It; ++It)
+			{
+				if (It->GetOwner() == Player && It->SoundEmitter->GetLastEmittedEvent().EventId.IsValid())
+				{
+					bThrownImpactObserved = true;
+					Test->TestEqual(TEXT("Noise-maker collision emits ThrownObject"), It->SoundEmitter->GetLastEmittedEvent().Type, ESoundEventType::ThrownObject);
+					Test->TestTrue(TEXT("Thrown object retains player source owner"), It->SoundEmitter->GetLastEmittedEvent().SourceOwner == Player);
+				}
+			}
+			if (!bThrownImpactObserved) { return false; }
 			Tap(EKeys::E);
 			Test->TestTrue(TEXT("E still interacts using the first-person camera trace"), Mission->HasObjective());
 			PC->SetControlRotation(FRotator::ZeroRotator);
@@ -170,10 +187,12 @@ public:
 			Player->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
 			Delay = 0.8f;
 			break;
+		}
 		case 13:
 			if (Player->GetCharacterMovement()->IsFalling()) { return false; }
 			SoftLanding = Player->GetLastLandingStrength();
 			Test->TestTrue(TEXT("A fall generates a landing impact"), SoftLanding > 0.0f);
+			Test->TestEqual(TEXT("Physical fall emits Landing event"), Player->GetSoundEmitter()->GetLastEmittedEvent().Type, ESoundEventType::Landing);
 			Player->SetActorLocation(FVector(1000, 1300, 1200));
 			Player->GetCharacterMovement()->Velocity = FVector::ZeroVector;
 			Player->GetCharacterMovement()->SetMovementMode(MOVE_Falling);

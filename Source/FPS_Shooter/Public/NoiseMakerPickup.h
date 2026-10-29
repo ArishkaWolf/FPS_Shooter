@@ -7,6 +7,7 @@
 
 class USphereComponent;
 class UStaticMeshComponent;
+class USoundRayInteractionComponent;
 
 UCLASS()
 class FPS_SHOOTER_API ANoiseMakerPickup : public AActor, public IStealthInteractable
@@ -19,6 +20,8 @@ public:
 	virtual void Interact_Implementation(AStealthCharacter* InteractingCharacter) override;
 
 protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
+	TObjectPtr<USoundRayInteractionComponent> SoundEmitter;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<USphereComponent> CollisionComponent;
 

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
+#include "NPCHearingComponent.h"
 #include "StealthAIController.generated.h"
 
 class AStealthPatrolPoint;
@@ -131,8 +132,7 @@ private:
 	bool bStoppedForDeath = false;
 	bool bPlayerVisible = false;
 	bool bHasSoundFocus = false;
-	float SoundFocusStrength = 0.0f;
-	float SoundFocusAge = 0.0f;
+	FNPCHearingStimulus SoundFocus;
 	TArray<FVector> SearchPoints;
 	int32 SearchPointIndex = 0;
 	int32 SearchPointsVisited = 0;

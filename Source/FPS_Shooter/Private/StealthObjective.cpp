@@ -7,11 +7,13 @@
 #include "Kismet/GameplayStatics.h"
 #include "StealthCharacter.h"
 #include "StealthGameMode.h"
+#include "SoundRayInteractionComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
 AStealthObjective::AStealthObjective()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	SoundEmitter = CreateDefaultSubobject<USoundRayInteractionComponent>(TEXT("SoundEmitter"));
 
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionComponent"));
 	CollisionComponent->InitSphereRadius(55.0f);
@@ -49,6 +51,7 @@ void AStealthObjective::Interact_Implementation(AStealthCharacter* InteractingCh
 	AStealthGameMode* GameMode = Cast<AStealthGameMode>(UGameplayStatics::GetGameMode(this));
 	if (GameMode && GameMode->CollectObjective(InteractingCharacter))
 	{
+		SoundEmitter->NotifyInteraction(InteractingCharacter);
 		Destroy();
 	}
 }

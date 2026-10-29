@@ -85,7 +85,7 @@ AStealthCharacter::AStealthCharacter()
 	SoundEmitter->RayCount = 16;
 	SoundEmitter->AttenuationPerMeter = 0.08f;
 	SoundEmitter->WallAbsorption = 0.65f;
-	SoundEmitter->MaxDistance = 1800.0f;
+	SoundEmitter->MaxDistance = WalkFootstepDistance;
 	SoundEmitter->MaxReflections = 2;
 	SoundEmitter->FootstepInterval = 0.48f;
 	SoundEmitter->MinSpeedForFootsteps = 25.0f;
@@ -375,8 +375,6 @@ void AStealthCharacter::ThrowNoiseMaker()
 
 	if (AFallingSoundSphere* NoiseMaker = GetWorld()->SpawnActor<AFallingSoundSphere>(NoiseMakerClass, SpawnLocation, Direction.Rotation(), SpawnParams))
 	{
-		NoiseMaker->SoundEmitter->bDrawDebug = false;
-		NoiseMaker->SoundEmitter->DebugDrawDuration = 0.0f;
 		NoiseMaker->CollisionComponent->SetPhysicsLinearVelocity(Direction * NoiseMakerThrowSpeed + GetVelocity());
 		--NoiseMakerCount;
 	}
@@ -425,10 +423,7 @@ void AStealthCharacter::FireWeapon()
 		UGameplayStatics::PlaySoundAtLocation(this, FireSound, FollowCamera->GetComponentLocation());
 	}
 
-	const float PreviousVolume = SoundEmitter->Volume;
-	SoundEmitter->Volume = 1.6f;
-	SoundEmitter->EmitFootstepSound();
-	SoundEmitter->Volume = PreviousVolume;
+	SoundEmitter->EmitSoundEvent(ESoundEventType::Gunshot, GunshotVolume, GunshotDistance, this);
 
 	const FVector TraceStart = FollowCamera->GetComponentLocation();
 	const FVector ShotDirection = FollowCamera->GetForwardVector();
@@ -536,6 +531,7 @@ void AStealthCharacter::UpdateMovementState()
 		Movement->MaxWalkSpeed = bIsAiming ? FMath::Min(CrouchSpeed, AimCrouchSpeed) : CrouchSpeed;
 		Movement->MaxWalkSpeedCrouched = Movement->MaxWalkSpeed;
 		SoundEmitter->Volume = CrouchFootstepVolume;
+		SoundEmitter->MaxDistance = CrouchFootstepDistance;
 		SoundEmitter->FootstepInterval = 0.62f;
 		return;
 	}
@@ -544,6 +540,7 @@ void AStealthCharacter::UpdateMovementState()
 	Movement->MaxWalkSpeed = bIsAiming ? FMath::Min(WalkSpeed, AimWalkSpeed)
 		: bIsReloading ? WalkSpeed * 0.7f : bCanSprint ? SprintSpeed : WalkSpeed;
 	SoundEmitter->Volume = bCanSprint ? SprintFootstepVolume : WalkFootstepVolume;
+	SoundEmitter->MaxDistance = bCanSprint ? SprintFootstepDistance : WalkFootstepDistance;
 	SoundEmitter->FootstepInterval = bCanSprint ? 0.32f : 0.48f;
 }
 
@@ -661,8 +658,6 @@ void AStealthCharacter::Landed(const FHitResult& Hit)
 		UGameplayStatics::PlaySoundAtLocation(this, LandingSound, GetActorLocation(),
 			FMath::Clamp(LastLandingStrength, 0.18f, 1.0f), FMath::Lerp(1.12f, 0.82f, ImpactAlpha));
 	}
-	const float PreviousVolume = SoundEmitter->Volume;
-	SoundEmitter->Volume = LastLandingStrength;
-	SoundEmitter->EmitFootstepSound();
-	SoundEmitter->Volume = PreviousVolume;
+	SoundEmitter->EmitSoundEvent(ESoundEventType::Landing, LastLandingStrength,
+		FMath::Lerp(SoftLandingDistance, HardLandingDistance, ImpactAlpha * ImpactAlpha), this);
 }

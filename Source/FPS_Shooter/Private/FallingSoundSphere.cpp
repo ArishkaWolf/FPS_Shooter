@@ -62,5 +62,5 @@ void AFallingSoundSphere::OnSphereHit(UPrimitiveComponent* HitComponent, AActor*
 
 	bEmittedSound = true;
 	SoundEmitter->RayCount = FMath::Max(1, CVarFallingSphereRayCount.GetValueOnGameThread());
-	SoundEmitter->EmitFootstepSound();
+	SoundEmitter->EmitSoundEvent(ESoundEventType::ThrownObject);
 }

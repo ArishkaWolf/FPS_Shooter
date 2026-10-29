@@ -16,6 +16,7 @@
 #include "StealthAIController.h"
 #include "StealthGameMode.h"
 #include "StealthNPCAnimInstance.h"
+#include "SoundRayEmitterComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
 ASoundHearingNPC::ASoundHearingNPC()
@@ -73,6 +74,12 @@ ASoundHearingNPC::ASoundHearingNPC()
 	HearingComponent->HearingRadius = 220.0f;
 	HearingComponent->ForgetDurationSeconds = 12.0f;
 	HearingComponent->bDrawDebug = false;
+	SoundEmitter = CreateDefaultSubobject<USoundRayEmitterComponent>(TEXT("SoundEmitter"));
+	SoundEmitter->bAutoEmitFootsteps = false;
+	SoundEmitter->RayCount = 16;
+	SoundEmitter->RayPitchDegrees = 0.0f;
+	SoundEmitter->Volume = 1.6f;
+	SoundEmitter->MaxDistance = 3000.0f;
 	NPCLabel = FText::FromString(TEXT("NPC"));
 
 	SoundLabel = CreateDefaultSubobject<UTextRenderComponent>(TEXT("SoundLabel"));
@@ -83,6 +90,7 @@ ASoundHearingNPC::ASoundHearingNPC()
 	SoundLabel->SetTextRenderColor(FColor::Cyan);
 	SoundLabel->SetWorldSize(28.0f);
 	SoundLabel->SetText(FText::FromString(TEXT("Sound: 0%")));
+	SoundLabel->SetVisibility(false);
 	CurrentHealth = MaxHealth;
 }
 
@@ -120,6 +128,7 @@ bool ASoundHearingNPC::FireWeaponAt(AActor* TargetActor)
 	LastShotDirection = FMath::VRandCone(LastShotAimDirection, FMath::DegreesToRadians(FMath::Clamp(FireSpreadDegrees, 0.0f, 12.0f)));
 	FireAnimationAge = 0.0f;
 	++ShotsFired;
+	SoundEmitter->EmitSoundEventAtLocation(ESoundEventType::Gunshot, TraceStart, -1.0f, -1.0f, this);
 	FHitResult Hit;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(GuardWeaponFire), true, this);
 	if (GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceStart + LastShotDirection * WeaponRange, ECC_Visibility, QueryParams) && Hit.GetActor())
@@ -193,6 +202,7 @@ void ASoundHearingNPC::Die()
 void ASoundHearingNPC::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	SoundLabel->SetVisibility(IsSoundRayDebugEnabled());
 	FireAnimationAge += DeltaSeconds;
 	HitAnimationAge += DeltaSeconds;
 	if (bDead)

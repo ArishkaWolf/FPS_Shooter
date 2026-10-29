@@ -122,33 +122,27 @@ void AStealthAIController::UpdateSight(float DeltaSeconds)
 
 void AStealthAIController::UpdateHearing(float DeltaSeconds)
 {
-	SoundFocusAge += DeltaSeconds;
+	SoundFocus.Age += DeltaSeconds;
 	UNPCHearingComponent* Hearing = ControlledNPC->HearingComponent;
 	if (!Hearing) { return; }
-	if (const AStealthGameMode* Mission = GetWorld()->GetAuthGameMode<AStealthGameMode>();
-		Mission && Mission->IsActorProtected(PlayerPawn.Get()))
-	{
-		LastProcessedHearingEventId = Hearing->HearingEventId;
-		Hearing->ClearSoundMemory();
-		return;
-	}
 	FNPCHearingStimulus Sound;
 	if (!Hearing->GetBestSound(Sound) || Sound.Id <= LastProcessedHearingEventId) { return; }
 	// Consume each selected observation once: old evidence cannot restart a completed search.
 	LastProcessedHearingEventId = Sound.Id;
+	const AActor* Source = Sound.Event.EventId.IsValid() ? Sound.Event.SourceOwner.Get() : PlayerPawn.Get();
+	if (const AStealthGameMode* Mission = GetWorld()->GetAuthGameMode<AStealthGameMode>();
+		Mission && Mission->IsActorProtected(Source)) { return; }
 	if (AIState == EStealthAIState::Chase || bPlayerVisible || Sound.Age > 4.0f) { return; }
 	const float Priority = Hearing->GetSoundPriority(Sound);
 	if (Priority < SuspiciousSoundThreshold) { return; }
 	if (bHasSoundFocus && AIState != EStealthAIState::Patrol)
 	{
-		const FNPCHearingStimulus Active { SearchOrigin, SoundFocusStrength, SoundFocusAge, 0 };
 		// Hysteresis avoids oscillation between similar reflections and footsteps.
-		if (Priority < Hearing->GetSoundPriority(Active) * 1.15f) { return; }
+		if (Priority < Hearing->GetSoundPriority(SoundFocus) * 1.15f) { return; }
 	}
 	const bool bSameArea = bHasSoundFocus && FVector::DistSquared2D(SearchOrigin, Sound.Location) < FMath::Square(120.0f);
 	bHasSoundFocus = true;
-	SoundFocusStrength = Sound.Strength;
-	SoundFocusAge = Sound.Age;
+	SoundFocus = Sound;
 	if (bSameArea && AIState != EStealthAIState::Patrol
 		&& !(AIState == EStealthAIState::Suspicious && Priority >= InvestigateSoundThreshold)) { return; }
 	// A sound can redirect a confirmed search but must not erase its pursuit flag.

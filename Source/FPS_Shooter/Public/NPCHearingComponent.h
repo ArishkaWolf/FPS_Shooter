@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "SoundRayEvent.h"
 #include "NPCHearingComponent.generated.h"
 
 // The ray emitter supplies an attenuated strength and the point where the ray was heard.
@@ -12,6 +13,8 @@ struct FNPCHearingStimulus
 	float Strength = 0.0f;
 	float Age = 0.0f;
 	int32 Id = 0;
+	FSoundRayEvent Event;
+	float MemoryDuration = 0.0f;
 };
 
 UCLASS(ClassGroup=(AI), meta=(BlueprintSpawnableComponent))
@@ -32,7 +35,7 @@ public:
 	float HearingRadius = 80.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug")
-	bool bDrawDebug = true;
+	bool bDrawDebug = false; // Legacy flag; visualization is controlled by SoundRays.Debug.
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug")
 	float DebugDrawDuration = 0.25f;
@@ -49,13 +52,23 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category="Hearing")
 	int32 HearingEventId = 0;
 
+	UPROPERTY(BlueprintReadOnly, Category="Hearing")
+	FSoundRayEvent LastHeardEvent;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Hearing")
+	TMap<ESoundEventType, float> TypePriorityWeights;
+
 	UFUNCTION(BlueprintCallable, Category="Hearing")
 	void HearSoundAtLocation(const FVector& SoundLocation, float Strength);
+
+	UFUNCTION(BlueprintCallable, Category="Hearing")
+	void HearSoundEvent(const FSoundRayEvent& Event);
 
 	UFUNCTION(BlueprintPure, Category="Hearing")
 	bool HasHeardSound() const { return CurrentSoundStrength > KINDA_SMALL_NUMBER; }
 
 	bool GetBestSound(FNPCHearingStimulus& OutSound) const;
+	int32 GetRememberedSoundCount() const { return SoundMemory.Num(); }
 	float GetSoundPriority(const FNPCHearingStimulus& Sound) const;
 	void ClearSoundMemory();
 
@@ -72,5 +85,7 @@ private:
 	// Bounded, coalesced memory prevents reflected rays from flooding the AI.
 	TArray<FNPCHearingStimulus> SoundMemory;
 	float GetMemoryDuration() const;
+	float GetMemoryDuration(const FNPCHearingStimulus& Sound) const;
+	void StoreSound(FNPCHearingStimulus Sound);
 	void RefreshBestSound();
 };

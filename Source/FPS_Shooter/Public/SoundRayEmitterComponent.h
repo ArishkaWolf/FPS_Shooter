@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "SoundRayEvent.h"
 #include "SoundRayEmitterComponent.generated.h"
 
 UCLASS(ClassGroup=(Audio), meta=(BlueprintSpawnableComponent))
@@ -49,7 +50,7 @@ public:
 	float MinSpeedForFootsteps = 10.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug")
-	bool bDrawDebug = true;
+	bool bDrawDebug = false; // Legacy asset compatibility; use SoundRays.Debug at runtime.
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Debug")
 	float DebugDrawDuration = 1.0f;
@@ -57,14 +58,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Sound Rays")
 	void EmitFootstepSound();
 
+	// Negative overrides use this component's existing Volume and MaxDistance.
+	UFUNCTION(BlueprintCallable, Category="Sound Rays")
+	void EmitSoundEvent(ESoundEventType Type, float VolumeOverride = -1.0f, float DistanceOverride = -1.0f, AActor* SourceOwner = nullptr);
+
+	UFUNCTION(BlueprintCallable, Category="Sound Rays")
+	void EmitSoundEventAtLocation(ESoundEventType Type, FVector Location, float VolumeOverride = -1.0f,
+		float DistanceOverride = -1.0f, AActor* SourceOwner = nullptr);
+
+	UFUNCTION(BlueprintPure, Category="Sound Rays")
+	FSoundRayEvent GetLastEmittedEvent() const { return LastEmittedEvent; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
 	float TimeUntilNextFootstep = 0.0f;
+	UPROPERTY(Transient)
+	FSoundRayEvent LastEmittedEvent;
 
 	bool ShouldAutoEmitFootstep() const;
-	void TraceSoundRay(const FVector& RayStart, const FVector& Direction, float StartVolume, int32 ReflectionIndex) const;
-	void NotifyListenersAlongRay(const FVector& RayStart, const FVector& RayEnd, float StartVolume, float EndVolume) const;
+	void TraceSoundRay(const FVector& RayStart, const FVector& Direction, float StartVolume, int32 ReflectionIndex,
+		const FSoundRayEvent& Event, float RayDistance) const;
+	void NotifyListenersAlongRay(const FVector& RayStart, const FVector& RayEnd, float StartVolume, float EndVolume,
+		const FSoundRayEvent& Event, int32 ReflectionIndex) const;
 };
