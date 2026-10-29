@@ -59,6 +59,7 @@ void AStealthAIController::Tick(float DeltaSeconds)
 	}
 
 	StateTime += DeltaSeconds;
+	TimeUntilNextShot = FMath::Max(0.0f, TimeUntilNextShot - DeltaSeconds);
 	UpdateSight(DeltaSeconds);
 	UpdateHearing();
 	UpdateState(DeltaSeconds);
@@ -141,6 +142,11 @@ void AStealthAIController::UpdateHearing()
 	}
 
 	LastProcessedHearingEventId = Hearing->HearingEventId;
+	if (const AStealthGameMode* GameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>();
+		GameMode && GameMode->IsActorProtected(PlayerPawn.Get()))
+	{
+		return;
+	}
 	if (Hearing->LastReceivedSoundStrength < InvestigateSoundThreshold || AIState == EStealthAIState::Chase)
 	{
 		return;
@@ -177,6 +183,10 @@ void AStealthAIController::UpdateState(float DeltaSeconds)
 		{
 			StopMovement();
 			WaitTimeRemaining = PatrolPoints[PatrolIndex]->WaitTime;
+			if (WaitTimeRemaining <= 0.0f)
+			{
+				AdvancePatrol();
+			}
 		}
 		else if (GetMoveStatus() == EPathFollowingStatus::Idle)
 		{
@@ -185,7 +195,7 @@ void AStealthAIController::UpdateState(float DeltaSeconds)
 		break;
 
 	case EStealthAIState::Investigate:
-		if (HasReachedDestination(SearchOrigin))
+		if (HasReachedDestination(SearchOrigin) || StateTime >= SearchDuration)
 		{
 			SetAIState(EStealthAIState::Search, SearchOrigin);
 		}
@@ -208,24 +218,26 @@ void AStealthAIController::UpdateState(float DeltaSeconds)
 		break;
 
 	case EStealthAIState::Chase:
-		if (PlayerPawn.IsValid()
-			&& FVector::DistSquared(ControlledNPC->GetActorLocation(), PlayerPawn->GetActorLocation()) <= FMath::Square(CaptureDistance))
-		{
-			FVector SeenLocation;
-			if (CanSeePlayer(SeenLocation))
-			{
-				if (AStealthGameMode* GameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>())
-				{
-					GameMode->DefeatPlayer(PlayerPawn.Get());
-				}
-				StopMovement();
-				break;
-			}
-		}
-
 		if (TimeSincePlayerSeen <= LoseSightDelay && PlayerPawn.IsValid())
 		{
-			MoveToActor(PlayerPawn.Get(), 100.0f, true, true, true, nullptr, true);
+			const float DistanceToPlayer = FVector::Dist(ControlledNPC->GetActorLocation(), PlayerPawn->GetActorLocation());
+			FVector SeenLocation;
+			if (DistanceToPlayer <= FireRange && CanSeePlayer(SeenLocation))
+			{
+				StopMovement();
+				SetFocus(PlayerPawn.Get());
+				if (TimeUntilNextShot <= 0.0f)
+				{
+					ControlledNPC->FireWeaponAt(PlayerPawn.Get());
+					TimeUntilNextShot = FireInterval;
+				}
+			}
+			else
+			{
+				ClearFocus(EAIFocusPriority::Gameplay);
+				// Once sight is lost, investigate the last observation instead of tracking through walls.
+				MoveToLocation(LastKnownPlayerLocation, 90.0f, true, true, true, false, nullptr, true);
+			}
 		}
 		else
 		{
@@ -239,7 +251,17 @@ void AStealthAIController::UpdateState(float DeltaSeconds)
 void AStealthAIController::SetAIState(EStealthAIState NewState, const FVector& FocusLocation)
 {
 	const EStealthAIState PreviousState = AIState;
+	if (NewState == EStealthAIState::Chase)
+	{
+		bSearchingForPlayer = true;
+		TimeUntilNextShot = FMath::Max(TimeUntilNextShot, FireInterval);
+	}
+	else if (NewState == EStealthAIState::Patrol)
+	{
+		bSearchingForPlayer = false;
+	}
 	AIState = NewState;
+	ClearFocus(EAIFocusPriority::Gameplay);
 	StateTime = 0.0f;
 	WaitTimeRemaining = 0.0f;
 	StopMovement();
@@ -275,10 +297,7 @@ void AStealthAIController::SetAIState(EStealthAIState NewState, const FVector& F
 	case EStealthAIState::Chase:
 		LastKnownPlayerLocation = FocusLocation;
 		ControlledNPC->GetCharacterMovement()->MaxWalkSpeed = ControlledNPC->ChaseSpeed;
-		if (PlayerPawn.IsValid())
-		{
-			MoveToActor(PlayerPawn.Get(), 100.0f, true, true, true, nullptr, true);
-		}
+		MoveToLocation(LastKnownPlayerLocation, 90.0f, true, true, true, false, nullptr, true);
 		break;
 	}
 }
@@ -324,6 +343,11 @@ void AStealthAIController::MoveToRandomSearchPoint()
 bool AStealthAIController::CanSeePlayer(FVector& OutPlayerLocation) const
 {
 	if (!ControlledNPC.IsValid() || !PlayerPawn.IsValid() || !GetWorld())
+	{
+		return false;
+	}
+	if (const AStealthGameMode* GameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>();
+		GameMode && GameMode->IsActorProtected(PlayerPawn.Get()))
 	{
 		return false;
 	}

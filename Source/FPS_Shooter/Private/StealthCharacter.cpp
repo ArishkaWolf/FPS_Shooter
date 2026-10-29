@@ -18,6 +18,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Particles/ParticleSystem.h"
 #include "SoundRayEmitterComponent.h"
+#include "StealthGameMode.h"
+#include "StealthArmsAnimInstance.h"
 #include "StealthInteractable.h"
 #include "Sound/SoundBase.h"
 #include "UObject/ConstructorHelpers.h"
@@ -42,6 +44,7 @@ AStealthCharacter::AStealthCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
@@ -49,7 +52,9 @@ AStealthCharacter::AStealthCharacter()
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
 	Movement->bOrientRotationToMovement = false;
 	Movement->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
-	Movement->JumpZVelocity = 500.0f;
+	Movement->JumpZVelocity = 0.0f;
+	Movement->GetNavAgentPropertiesRef().bCanJump = false;
+	JumpMaxCount = 0;
 	Movement->AirControl = 0.35f;
 	Movement->MaxWalkSpeed = WalkSpeed;
 	Movement->MaxWalkSpeedCrouched = CrouchSpeed;
@@ -63,10 +68,11 @@ AStealthCharacter::AStealthCharacter()
 
 	FirstPersonArms = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonArms"));
 	FirstPersonArms->SetupAttachment(FollowCamera);
-	FirstPersonArms->SetRelativeLocation(FVector(-30.0f, 0.0f, -150.0f));
+	FirstPersonArms->SetRelativeLocation(HipArmsLocation);
 	FirstPersonArms->SetOnlyOwnerSee(true);
 	FirstPersonArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FirstPersonArms->CastShadow = false;
+	FirstPersonArms->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 
 	WeaponMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh"));
 	WeaponMesh->SetupAttachment(FirstPersonArms, TEXT("GripPoint"));
@@ -92,6 +98,8 @@ AStealthCharacter::AStealthCharacter()
 		GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
 		GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 		GetMesh()->SetOwnerNoSee(true);
+		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		GetMesh()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	}
 
 	static ConstructorHelpers::FClassFinder<UAnimInstance> MannyAnimBlueprint(TEXT("/Game/Characters/Mannequins/Animations/ABP_Manny"));
@@ -106,7 +114,7 @@ AStealthCharacter::AStealthCharacter()
 		FirstPersonArms->SetSkeletalMesh(ArmsMesh.Object);
 	}
 
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> GunMesh(TEXT("/Game/FPWeapon/Mesh/SK_FPGun.SK_FPGun"));
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> GunMesh(TEXT("/Game/MilitaryWeapSilver/Weapons/Assault_Rifle_A.Assault_Rifle_A"));
 	if (GunMesh.Succeeded())
 	{
 		WeaponMesh->SetSkeletalMesh(GunMesh.Object);
@@ -118,6 +126,12 @@ AStealthCharacter::AStealthCharacter()
 	ArmsRunAnimation = RifleRun.Object;
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> RifleFire(TEXT("/Game/FirstPersonArms/Animations/FP_Rifle_Fire.FP_Rifle_Fire"));
 	ArmsFireAnimation = RifleFire.Object;
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> RifleReload(TEXT("/Game/MilitaryWeapSilver/Weapons/Animations/Reload_Rifle_Hip_W.Reload_Rifle_Hip_W"));
+	WeaponReloadAnimation = RifleReload.Object;
+	static ConstructorHelpers::FObjectFinder<USoundBase> RifleReloadSound(TEXT("/Game/MilitaryWeapSilver/Sound/Rifle/Cues/Rifle_Reload_Cue.Rifle_Reload_Cue"));
+	ReloadSound = RifleReloadSound.Object;
+	static ConstructorHelpers::FObjectFinder<USoundBase> LandingImpact(TEXT("/Game/Audio/Stealth/Landing_Impact.Landing_Impact"));
+	LandingSound = LandingImpact.Object;
 	static ConstructorHelpers::FObjectFinder<USoundBase> RifleFireSound(TEXT("/Game/FPWeapon/Audio/FirstPersonTemplateWeaponFire02.FirstPersonTemplateWeaponFire02"));
 	FireSound = RifleFireSound.Object;
 	static ConstructorHelpers::FObjectFinder<UParticleSystem> RifleMuzzleFlash(TEXT("/Game/MilitaryWeapSilver/FX/P_AssaultRifle_MuzzleFlash.P_AssaultRifle_MuzzleFlash"));
@@ -125,18 +139,28 @@ AStealthCharacter::AStealthCharacter()
 
 	NoiseMakerClass = AFallingSoundSphere::StaticClass();
 	AmmoInMagazine = MagazineSize;
+	CurrentHealth = MaxHealth;
 	CreateInputMapping();
 }
 
 void AStealthCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	CurrentHealth = FMath::Max(1.0f, MaxHealth);
+	AmmoInMagazine = FMath::Max(1, MagazineSize);
 	ApplyInputMapping();
+	FirstPersonArms->SetRelativeLocation(HipArmsLocation);
 	FirstPersonArms->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	FollowCamera->SetFieldOfView(HipFieldOfView);
 	if (ArmsIdleAnimation)
 	{
 		FirstPersonArms->PlayAnimation(ArmsIdleAnimation, true);
+		FirstPersonArms->TickAnimation(0.0f, false);
+		FirstPersonArms->RefreshBoneTransforms();
 	}
+	CalibrateWeapon();
+	FirstPersonArms->SetAnimInstanceClass(UStealthArmsAnimInstance::StaticClass());
+	FirstPersonArms->AddTickPrerequisiteActor(this);
 }
 
 void AStealthCharacter::PawnClientRestart()
@@ -163,19 +187,26 @@ void AStealthCharacter::ApplyInputMapping()
 void AStealthCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (const AStealthGameMode* GameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>();
+		GameMode && GameMode->GetMissionState() != EStealthMissionState::Playing)
+	{
+		return;
+	}
+	if (GetCharacterMovement()->IsFalling())
+	{
+		PeakFallSpeed = FMath::Max(PeakFallSpeed, -GetVelocity().Z);
+	}
+	UpdateReload(DeltaSeconds);
+	bIsAiming = bWantsToAim && !bIsReloading && CanPerformMissionAction();
 	UpdateMovementState();
-	UpdateFirstPersonAnimation(DeltaSeconds);
 	TimeUntilNextShot = FMath::Max(0.0f, TimeUntilNextShot - DeltaSeconds);
+	FireAnimationTimeRemaining = FMath::Max(0.0f, FireAnimationTimeRemaining - DeltaSeconds);
 	if (bWantsToFire && TimeUntilNextShot <= 0.0f)
 	{
 		FireWeapon();
 	}
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(2402, 0.0f, FColor::White,
-			FString::Printf(TEXT("AMMO %d / %d"), AmmoInMagazine, ReserveAmmo));
-	}
+	UpdateFirstPersonAnimation(DeltaSeconds);
+	UpdateFirstPersonPose(DeltaSeconds);
 }
 
 void AStealthCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -187,12 +218,17 @@ void AStealthCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &AStealthCharacter::Look);
 	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Started, this, &AStealthCharacter::StartSprint);
 	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Completed, this, &AStealthCharacter::StopSprint);
+	EnhancedInput->BindAction(SprintAction, ETriggerEvent::Canceled, this, &AStealthCharacter::StopSprint);
 	EnhancedInput->BindAction(CrouchAction, ETriggerEvent::Started, this, &AStealthCharacter::ToggleCrouch);
 	EnhancedInput->BindAction(InteractAction, ETriggerEvent::Started, this, &AStealthCharacter::Interact);
 	EnhancedInput->BindAction(ThrowAction, ETriggerEvent::Started, this, &AStealthCharacter::ThrowNoiseMaker);
 	EnhancedInput->BindAction(FireAction, ETriggerEvent::Started, this, &AStealthCharacter::StartFire);
 	EnhancedInput->BindAction(FireAction, ETriggerEvent::Completed, this, &AStealthCharacter::StopFire);
+	EnhancedInput->BindAction(FireAction, ETriggerEvent::Canceled, this, &AStealthCharacter::StopFire);
 	EnhancedInput->BindAction(ReloadAction, ETriggerEvent::Started, this, &AStealthCharacter::ReloadWeapon);
+	EnhancedInput->BindAction(AimAction, ETriggerEvent::Started, this, &AStealthCharacter::StartAim);
+	EnhancedInput->BindAction(AimAction, ETriggerEvent::Completed, this, &AStealthCharacter::StopAim);
+	EnhancedInput->BindAction(AimAction, ETriggerEvent::Canceled, this, &AStealthCharacter::StopAim);
 }
 
 void AStealthCharacter::AddNoiseMakers(int32 Amount)
@@ -252,6 +288,11 @@ void AStealthCharacter::CreateInputMapping()
 	ReloadAction->ValueType = EInputActionValueType::Boolean;
 	InputMappingContext->MapKey(ReloadAction, EKeys::R);
 	InputMappingContext->MapKey(ReloadAction, EKeys::Gamepad_FaceButton_Left);
+
+	AimAction = NewObject<UInputAction>(this, TEXT("AimAction"));
+	AimAction->ValueType = EInputActionValueType::Boolean;
+	InputMappingContext->MapKey(AimAction, EKeys::RightMouseButton);
+	InputMappingContext->MapKey(AimAction, EKeys::Gamepad_LeftTrigger);
 }
 
 void AStealthCharacter::Move(const FInputActionValue& Value)
@@ -299,6 +340,11 @@ void AStealthCharacter::ToggleCrouch()
 
 void AStealthCharacter::Interact()
 {
+	if (!CanPerformMissionAction())
+	{
+		return;
+	}
+	CancelReload();
 	FHitResult Hit;
 	const FVector Start = FollowCamera->GetComponentLocation();
 	const FVector End = Start + FollowCamera->GetForwardVector() * InteractionDistance;
@@ -314,10 +360,11 @@ void AStealthCharacter::Interact()
 
 void AStealthCharacter::ThrowNoiseMaker()
 {
-	if (NoiseMakerCount <= 0 || !NoiseMakerClass)
+	if (!CanPerformMissionAction() || NoiseMakerCount <= 0 || !NoiseMakerClass)
 	{
 		return;
 	}
+	CancelReload();
 
 	const FVector Direction = FollowCamera->GetForwardVector();
 	const FVector SpawnLocation = FollowCamera->GetComponentLocation() + Direction * 120.0f;
@@ -337,6 +384,10 @@ void AStealthCharacter::ThrowNoiseMaker()
 
 void AStealthCharacter::StartFire()
 {
+	if (!CanPerformMissionAction() || bIsReloading)
+	{
+		return;
+	}
 	bWantsToFire = true;
 	if (TimeUntilNextShot <= 0.0f)
 	{
@@ -351,7 +402,7 @@ void AStealthCharacter::StopFire()
 
 void AStealthCharacter::FireWeapon()
 {
-	if (AmmoInMagazine <= 0)
+	if (!CanPerformMissionAction() || bIsReloading || AmmoInMagazine <= 0)
 	{
 		bWantsToFire = false;
 		return;
@@ -362,13 +413,12 @@ void AStealthCharacter::FireWeapon()
 
 	if (ArmsFireAnimation)
 	{
-		FirstPersonArms->PlayAnimation(ArmsFireAnimation, false);
 		FireAnimationTimeRemaining = ArmsFireAnimation->GetPlayLength();
-		bArmsPlayingRun = GetVelocity().SizeSquared2D() <= FMath::Square(20.0f);
 	}
+	ArmsState = EStealthArmsState::Fire;
 	if (MuzzleFlash)
 	{
-		UGameplayStatics::SpawnEmitterAttached(MuzzleFlash, WeaponMesh, TEXT("Muzzle"));
+		UGameplayStatics::SpawnEmitterAttached(MuzzleFlash, WeaponMesh, TEXT("MuzzleFlash"));
 	}
 	if (FireSound)
 	{
@@ -387,39 +437,95 @@ void AStealthCharacter::FireWeapon()
 	FHitResult Hit;
 	if (GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, QueryParams) && Hit.GetActor())
 	{
-		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), WeaponDamage, ShotDirection, Hit,
+		const FString BoneName = Hit.BoneName.ToString().ToLower();
+		const float HitMultiplier = BoneName.Contains(TEXT("head")) ? 3.0f
+			: (BoneName.Contains(TEXT("spine")) || BoneName.Contains(TEXT("neck"))) ? 1.25f : 1.0f;
+		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), WeaponDamage * HitMultiplier, ShotDirection, Hit,
 			GetController(), this, UDamageType::StaticClass());
 	}
 }
 
 void AStealthCharacter::ReloadWeapon()
 {
-	const int32 NeededAmmo = MagazineSize - AmmoInMagazine;
-	const int32 AmmoToLoad = FMath::Min(NeededAmmo, ReserveAmmo);
-	AmmoInMagazine += AmmoToLoad;
-	ReserveAmmo -= AmmoToLoad;
+	if (!CanPerformMissionAction() || bIsReloading || AmmoInMagazine >= MagazineSize || ReserveAmmo <= 0)
+	{
+		return;
+	}
+	bIsReloading = true;
+	ReloadElapsed = 0.0f;
+	bWantsToFire = false;
+	bIsAiming = false;
+	FireAnimationTimeRemaining = 0.0f;
+	ArmsState = EStealthArmsState::Reload;
+	if (WeaponReloadAnimation)
+	{
+		WeaponMesh->PlayAnimation(WeaponReloadAnimation, false);
+		WeaponMesh->SetPlayRate(WeaponReloadAnimation->GetPlayLength() / FMath::Max(0.2f, ReloadDuration));
+	}
+	if (ReloadSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, ReloadSound, GetActorLocation());
+	}
+}
+
+void AStealthCharacter::StartAim()
+{
+	bWantsToAim = CanPerformMissionAction();
+	bIsAiming = bWantsToAim && !bIsReloading;
+}
+
+void AStealthCharacter::StopAim()
+{
+	bIsAiming = false;
+	bWantsToAim = false;
+}
+
+float AStealthCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
+	AController* EventInstigator, AActor* DamageCauser)
+{
+	if (!CanPerformMissionAction() || DamageAmount <= 0.0f)
+	{
+		return 0.0f;
+	}
+	const float AppliedDamage = FMath::Clamp(
+		Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser), 0.0f, CurrentHealth);
+	CurrentHealth = FMath::Max(0.0f, CurrentHealth - AppliedDamage);
+	if (CurrentHealth <= 0.0f)
+	{
+		if (AStealthGameMode* GameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>())
+		{
+			GameMode->DefeatPlayer(this);
+		}
+	}
+	return AppliedDamage;
+}
+
+bool AStealthCharacter::CanPerformMissionAction() const
+{
+	const AStealthGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AStealthGameMode>() : nullptr;
+	return CurrentHealth > 0.0f && (!GameMode ||
+		(GameMode->GetMissionState() == EStealthMissionState::Playing && !GameMode->IsActorProtected(this)));
+}
+
+void AStealthCharacter::StopMissionActions()
+{
+	bWantsToFire = false;
+	bWantsToSprint = false;
+	bIsAiming = false;
+	bWantsToAim = false;
+	CancelReload();
+	GetCharacterMovement()->StopMovementImmediately();
+	GetCharacterMovement()->DisableMovement();
+	SoundEmitter->SetComponentTickEnabled(false);
 }
 
 void AStealthCharacter::UpdateFirstPersonAnimation(float DeltaSeconds)
 {
-	if (FireAnimationTimeRemaining > 0.0f)
-	{
-		FireAnimationTimeRemaining = FMath::Max(0.0f, FireAnimationTimeRemaining - DeltaSeconds);
-		return;
-	}
-
-	const bool bShouldPlayRun = GetVelocity().SizeSquared2D() > FMath::Square(20.0f);
-	if (bShouldPlayRun == bArmsPlayingRun)
-	{
-		return;
-	}
-
-	bArmsPlayingRun = bShouldPlayRun;
-	UAnimSequence* Animation = bArmsPlayingRun ? ArmsRunAnimation : ArmsIdleAnimation;
-	if (Animation)
-	{
-		FirstPersonArms->PlayAnimation(Animation, true);
-	}
+	ArmsState = bIsReloading ? EStealthArmsState::Reload
+		: FireAnimationTimeRemaining > 0.0f ? EStealthArmsState::Fire
+		: bIsAiming ? EStealthArmsState::Aim
+		: bIsCrouched ? EStealthArmsState::Crouch
+		: GetVelocity().SizeSquared2D() > FMath::Square(20.0f) ? EStealthArmsState::Run : EStealthArmsState::Idle;
 }
 
 void AStealthCharacter::UpdateMovementState()
@@ -427,14 +533,136 @@ void AStealthCharacter::UpdateMovementState()
 	UCharacterMovementComponent* Movement = GetCharacterMovement();
 	if (bIsCrouched)
 	{
-		Movement->MaxWalkSpeed = CrouchSpeed;
+		Movement->MaxWalkSpeed = bIsAiming ? FMath::Min(CrouchSpeed, AimCrouchSpeed) : CrouchSpeed;
+		Movement->MaxWalkSpeedCrouched = Movement->MaxWalkSpeed;
 		SoundEmitter->Volume = CrouchFootstepVolume;
 		SoundEmitter->FootstepInterval = 0.62f;
 		return;
 	}
 
-	const bool bCanSprint = bWantsToSprint && GetVelocity().SizeSquared2D() > 1.0f;
-	Movement->MaxWalkSpeed = bCanSprint ? SprintSpeed : WalkSpeed;
+	const bool bCanSprint = bWantsToSprint && !bIsAiming && !bIsReloading && GetVelocity().SizeSquared2D() > 1.0f;
+	Movement->MaxWalkSpeed = bIsAiming ? FMath::Min(WalkSpeed, AimWalkSpeed)
+		: bIsReloading ? WalkSpeed * 0.7f : bCanSprint ? SprintSpeed : WalkSpeed;
 	SoundEmitter->Volume = bCanSprint ? SprintFootstepVolume : WalkFootstepVolume;
 	SoundEmitter->FootstepInterval = bCanSprint ? 0.32f : 0.48f;
+}
+
+void AStealthCharacter::CalibrateWeapon()
+{
+	// Assault_Rifle_A points along model +Y. The old GripPoint socket was authored for SK_FPGun.
+	const FTransform Hand = FirstPersonArms->GetSocketTransform(TEXT("hand_r"), RTS_World);
+	const FTransform OldGrip = FirstPersonArms->GetSocketTransform(TEXT("GripPoint"), RTS_World).GetRelativeTransform(Hand);
+	const FQuat WeaponWorldRotation = FRotationMatrix::MakeFromYZ(FollowCamera->GetForwardVector(), FollowCamera->GetUpVector()).ToQuat();
+	const FQuat GripRotation = Hand.GetRotation().Inverse() * WeaponWorldRotation * WeaponGripTransform.GetRotation();
+	const FVector ModelGrip = WeaponMesh->GetSocketTransform(TEXT("Grip_Bone"), RTS_Component).GetLocation();
+	WeaponMesh->AttachToComponent(FirstPersonArms, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("hand_r"));
+	WeaponMesh->SetRelativeTransform(FTransform(GripRotation,
+		OldGrip.GetLocation() + WeaponGripTransform.GetLocation() - GripRotation.RotateVector(ModelGrip), WeaponGripTransform.GetScale3D()));
+	WeaponToHandTransform = WeaponMesh->GetRelativeTransform();
+
+	const FTransform WeaponInArms = WeaponMesh->GetComponentTransform().GetRelativeTransform(FirstPersonArms->GetComponentTransform());
+	const FQuat DesiredCameraRotation = FRotationMatrix::MakeFromYZ(FVector::ForwardVector, FVector::UpVector).ToQuat();
+	const FQuat ArmsRotation = DesiredCameraRotation * WeaponInArms.GetRotation().Inverse();
+	const FVector ArmsLocation = FVector(AimSightDistance, 0, 0) - ArmsRotation.RotateVector(WeaponInArms.TransformPosition(IronSightLocation));
+	AimArmsTransform = FTransform(ArmsRotation, ArmsLocation);
+}
+
+void AStealthCharacter::UpdateFirstPersonPose(float DeltaSeconds)
+{
+	AimAlpha = FMath::FInterpTo(AimAlpha, bIsAiming ? 1.0f : 0.0f, DeltaSeconds, AimInterpSpeed);
+	CrouchAlpha = FMath::FInterpTo(CrouchAlpha, bIsCrouched ? 1.0f : 0.0f, DeltaSeconds, 9.0f);
+	FollowCamera->SetFieldOfView(FMath::Lerp(HipFieldOfView, AimFieldOfView, AimAlpha));
+	FTransform Target;
+	Target.Blend(FTransform(FQuat::Identity, HipArmsLocation), AimArmsTransform, AimAlpha);
+	FVector Offset(0, -CrouchAlpha, -2.0f * CrouchAlpha);
+	Offset *= 1.0f - AimAlpha;
+	const float TargetTilt = bIsReloading ? FMath::SmoothStep(0.0f, 0.16f, GetReloadProgress())
+		* (1.0f - FMath::SmoothStep(0.82f, 1.0f, GetReloadProgress())) : 0.0f;
+	ReloadPoseTilt = FMath::FInterpTo(ReloadPoseTilt, TargetTilt, DeltaSeconds, 18.0f);
+	Offset += FVector(12, -10, 25) * ReloadPoseTilt;
+	// Rotate around the grip, not the skeleton origin at the character's feet.
+	const FVector Pivot = FirstPersonArms->GetSocketTransform(TEXT("hand_r"), RTS_Component).GetLocation();
+	const FVector PivotInCamera = Target.TransformPosition(Pivot);
+	const FQuat TiltedRotation = FQuat::Slerp(FQuat::Identity, FQuat(FRotator(-8, 10, -20)), ReloadPoseTilt) * Target.GetRotation();
+	Target.SetRotation(TiltedRotation);
+	Target.SetLocation(PivotInCamera - TiltedRotation.RotateVector(Pivot));
+	Target.AddToTranslation(Offset);
+	FirstPersonArms->SetRelativeTransform(Target);
+}
+
+float AStealthCharacter::GetReloadProgress() const
+{
+	return bIsReloading ? FMath::Clamp(ReloadElapsed / FMath::Max(0.2f, ReloadDuration), 0.0f, 1.0f) : 0.0f;
+}
+
+float AStealthCharacter::GetShotAnimationAge() const
+{
+	return FireAnimationTimeRemaining > 0.0f && ArmsFireAnimation
+		? ArmsFireAnimation->GetPlayLength() - FireAnimationTimeRemaining : BIG_NUMBER;
+}
+
+void AStealthCharacter::CancelReload()
+{
+	if (bIsReloading)
+	{
+		bIsReloading = false;
+		ReloadElapsed = 0.0f;
+		WeaponMesh->SetAnimation(nullptr);
+	}
+}
+
+void AStealthCharacter::UpdateReload(float DeltaSeconds)
+{
+	if (!bIsReloading)
+	{
+		return;
+	}
+	ReloadElapsed += DeltaSeconds;
+	if (ReloadElapsed >= FMath::Max(0.2f, ReloadDuration))
+	{
+		const int32 AmmoToLoad = FMath::Min(FMath::Max(0, MagazineSize - AmmoInMagazine), ReserveAmmo);
+		AmmoInMagazine += AmmoToLoad;
+		ReserveAmmo -= AmmoToLoad;
+		CancelReload();
+	}
+}
+
+bool AStealthCharacter::CanJumpInternal_Implementation() const
+{
+	return false;
+}
+
+void AStealthCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
+	if (GetCharacterMovement()->IsFalling() && PrevMovementMode != MOVE_Falling)
+	{
+		PeakFallSpeed = FMath::Max(0.0f, -GetVelocity().Z);
+	}
+}
+
+void AStealthCharacter::Landed(const FHitResult& Hit)
+{
+	const float ImpactSpeed = FMath::Max(PeakFallSpeed, -GetVelocity().Z);
+	Super::Landed(Hit);
+	PeakFallSpeed = 0.0f;
+	LastLandingStrength = 0.0f;
+	const AStealthGameMode* Mission = GetWorld()->GetAuthGameMode<AStealthGameMode>();
+	if (CurrentHealth <= 0.0f || ImpactSpeed < MinLandingSpeed
+		|| (Mission && Mission->GetMissionState() != EStealthMissionState::Playing))
+	{
+		return;
+	}
+	const float ImpactAlpha = FMath::GetMappedRangeValueClamped(
+		FVector2D(MinLandingSpeed, FMath::Max(MinLandingSpeed + 1.0f, HardLandingSpeed)), FVector2D(0, 1), ImpactSpeed);
+	LastLandingStrength = FMath::Lerp(0.18f, 1.2f, ImpactAlpha * ImpactAlpha);
+	if (LandingSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, LandingSound, GetActorLocation(),
+			FMath::Clamp(LastLandingStrength, 0.18f, 1.0f), FMath::Lerp(1.12f, 0.82f, ImpactAlpha));
+	}
+	const float PreviousVolume = SoundEmitter->Volume;
+	SoundEmitter->Volume = LastLandingStrength;
+	SoundEmitter->EmitFootstepSound();
+	SoundEmitter->Volume = PreviousVolume;
 }

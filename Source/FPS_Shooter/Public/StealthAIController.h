@@ -33,6 +33,9 @@ public:
 	float GetDetectionLevel() const { return DetectionLevel; }
 
 	UFUNCTION(BlueprintPure, Category="Stealth AI")
+	bool HasActivePursuit() const { return AIState == EStealthAIState::Chase || bSearchingForPlayer; }
+
+	UFUNCTION(BlueprintPure, Category="Stealth AI")
 	FText GetStateDisplayName() const;
 
 protected:
@@ -68,8 +71,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Search", meta=(ClampMin="0.0"))
 	float SearchRadius = 450.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Chase", meta=(ClampMin="0.0"))
-	float CaptureDistance = 120.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat", meta=(ClampMin="0.0"))
+	float FireRange = 1100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat", meta=(ClampMin="0.1"))
+	float FireInterval = 0.8f;
 
 private:
 	TWeakObjectPtr<ASoundHearingNPC> ControlledNPC;
@@ -81,6 +87,8 @@ private:
 	float StateTime = 0.0f;
 	float WaitTimeRemaining = 0.0f;
 	float TimeSincePlayerSeen = BIG_NUMBER;
+	float TimeUntilNextShot = 0.0f;
+	bool bSearchingForPlayer = false;
 	FVector LastKnownPlayerLocation = FVector::ZeroVector;
 	FVector SearchOrigin = FVector::ZeroVector;
 

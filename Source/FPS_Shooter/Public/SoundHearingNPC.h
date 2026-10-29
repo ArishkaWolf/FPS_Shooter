@@ -5,7 +5,9 @@
 #include "SoundHearingNPC.generated.h"
 
 class UNPCHearingComponent;
+class UParticleSystem;
 class USkeletalMeshComponent;
+class USoundBase;
 class UTextRenderComponent;
 
 UCLASS()
@@ -17,6 +19,7 @@ public:
 	ASoundHearingNPC();
 	virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
 		AController* EventInstigator, AActor* DamageCauser) override;
+	void FireWeaponAt(AActor* TargetActor);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UNPCHearingComponent> HearingComponent;
@@ -44,6 +47,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat", meta=(ClampMin="1.0"))
 	float MaxHealth = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Combat", meta=(ClampMin="0.0"))
+	float FireDamage = 14.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combat")
+	TObjectPtr<USoundBase> FireSound;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Combat")
+	TObjectPtr<UParticleSystem> MuzzleFlash;
 
 protected:
 	virtual void Tick(float DeltaSeconds) override;

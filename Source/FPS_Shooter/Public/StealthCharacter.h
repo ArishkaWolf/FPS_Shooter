@@ -15,6 +15,17 @@ class USkeletalMeshComponent;
 class USoundBase;
 class USoundRayEmitterComponent;
 
+UENUM(BlueprintType)
+enum class EStealthArmsState : uint8
+{
+	Idle,
+	Run,
+	Crouch,
+	Fire,
+	Reload,
+	Aim
+};
+
 UCLASS()
 class FPS_SHOOTER_API AStealthCharacter : public ACharacter
 {
@@ -26,6 +37,10 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void PawnClientRestart() override;
+	virtual void Landed(const FHitResult& Hit) override;
+	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode = 0) override;
+	virtual float TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
 
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	void AddNoiseMakers(int32 Amount = 1);
@@ -33,8 +48,40 @@ public:
 	UFUNCTION(BlueprintPure, Category="Inventory")
 	int32 GetNoiseMakerCount() const { return NoiseMakerCount; }
 
+	UFUNCTION(BlueprintPure, Category="Combat")
+	float GetHealth() const { return CurrentHealth; }
+	void StopMissionActions();
+	bool CanPerformMissionAction() const;
+
+	UFUNCTION(BlueprintPure, Category="Combat")
+	int32 GetAmmoInMagazine() const { return AmmoInMagazine; }
+
+	UFUNCTION(BlueprintPure, Category="Combat")
+	int32 GetReserveAmmo() const { return ReserveAmmo; }
+
+	UFUNCTION(BlueprintPure, Category="First Person")
+	EStealthArmsState GetArmsState() const { return ArmsState; }
+
+	UFUNCTION(BlueprintPure, Category="Weapon")
+	bool IsReloading() const { return bIsReloading; }
+
+	UFUNCTION(BlueprintPure, Category="Weapon")
+	float GetReloadProgress() const;
+
+	float GetAimAlpha() const { return AimAlpha; }
+	float GetShotAnimationAge() const;
+	float GetLastLandingStrength() const { return LastLandingStrength; }
+	UAnimSequence* GetArmsIdleAnimation() const { return ArmsIdleAnimation; }
+	UAnimSequence* GetArmsRunAnimation() const { return ArmsRunAnimation; }
+	UAnimSequence* GetArmsFireAnimation() const { return ArmsFireAnimation; }
+	FTransform GetWeaponToHandTransform() const { return WeaponToHandTransform; }
+	FVector GetMagazineGripLocation() const { return MagazineGripLocation; }
+	FVector GetForegripLocation() const { return ForegripLocation; }
+	FVector GetIronSightLocation() const { return IronSightLocation; }
+
 protected:
 	virtual void BeginPlay() override;
+	virtual bool CanJumpInternal_Implementation() const override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UCameraComponent> FollowCamera;
@@ -93,6 +140,61 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0.0"))
 	float WeaponRange = 10000.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat", meta=(ClampMin="1.0"))
+	float MaxHealth = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="10.0", ClampMax="120.0"))
+	float HipFieldOfView = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="10.0", ClampMax="120.0"))
+	float AimFieldOfView = 65.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Aim", meta=(ClampMin="1.0"))
+	float AimInterpSpeed = 12.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Aim", meta=(ClampMin="1.0"))
+	float AimWalkSpeed = 170.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Aim", meta=(ClampMin="1.0"))
+	float AimCrouchSpeed = 125.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Aim")
+	FVector HipArmsLocation = FVector(-30.0f, 0.0f, -150.0f);
+
+	// Model-space point on top of the receiver, aligned to the camera when aiming.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Aim")
+	FVector IronSightLocation = FVector(0.0f, -10.0f, 20.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Aim", meta=(ClampMin="15.0"))
+	float AimSightDistance = 40.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon")
+	FTransform WeaponGripTransform;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon")
+	FVector MagazineGripLocation = FVector(0.0f, 12.0f, -7.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon")
+	FVector ForegripLocation = FVector(0.0f, 32.0f, 3.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0.2"))
+	float ReloadDuration = 2.2f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon")
+	TObjectPtr<UAnimSequence> WeaponReloadAnimation;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon")
+	TObjectPtr<USoundBase> ReloadSound;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Sound")
+	TObjectPtr<USoundBase> LandingSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="0.0"))
+	float MinLandingSpeed = 200.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Sound", meta=(ClampMin="1.0"))
+	float HardLandingSpeed = 1000.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Weapon")
 	TObjectPtr<UAnimSequence> ArmsIdleAnimation;
 
@@ -136,12 +238,27 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ReloadAction;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> AimAction;
+
 	bool bWantsToSprint = false;
 	bool bWantsToFire = false;
+	bool bWantsToAim = false;
+	bool bIsAiming = false;
+	bool bIsReloading = false;
+	EStealthArmsState ArmsState = EStealthArmsState::Idle;
+	float ReloadElapsed = 0.0f;
+	float AimAlpha = 0.0f;
+	float CrouchAlpha = 0.0f;
+	float ReloadPoseTilt = 0.0f;
+	float PeakFallSpeed = 0.0f;
+	float LastLandingStrength = 0.0f;
+	FTransform AimArmsTransform;
+	FTransform WeaponToHandTransform;
 	float TimeUntilNextShot = 0.0f;
 	float FireAnimationTimeRemaining = 0.0f;
 	int32 AmmoInMagazine = 0;
-	bool bArmsPlayingRun = false;
+	float CurrentHealth = 100.0f;
 
 	void CreateInputMapping();
 	void ApplyInputMapping();
@@ -156,6 +273,12 @@ private:
 	void StopFire();
 	void FireWeapon();
 	void ReloadWeapon();
+	void StartAim();
+	void StopAim();
+	void CancelReload();
+	void UpdateReload(float DeltaSeconds);
+	void CalibrateWeapon();
+	void UpdateFirstPersonPose(float DeltaSeconds);
 	void UpdateMovementState();
 	void UpdateFirstPersonAnimation(float DeltaSeconds);
 };

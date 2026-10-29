@@ -33,9 +33,25 @@ void AStealthExitZone::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	const AStealthGameMode* GameMode = Cast<AStealthGameMode>(UGameplayStatics::GetGameMode(this));
 	const bool bUnlocked = GameMode && GameMode->HasObjective();
-	LabelComponent->SetText(FText::FromString(bUnlocked ? TEXT("EXIT") : TEXT("EXIT LOCKED")));
-	LabelComponent->SetTextRenderColor(bUnlocked ? FColor::Green : FColor::Red);
-	LightComponent->SetLightColor(bUnlocked ? FLinearColor::Green : FLinearColor::Red);
+	const bool bPursued = GameMode && GameMode->IsPlayerPursued();
+	const FColor ExitColor = !bUnlocked ? FColor::Red : bPursued ? FColor::Yellow : FColor::Green;
+	LabelComponent->SetText(FText::FromString(!bUnlocked ? TEXT("EXIT - INTEL REQUIRED")
+		: bPursued ? TEXT("EXIT - LOSE THE GUARDS") : TEXT("EXIT - READY")));
+	LabelComponent->SetTextRenderColor(ExitColor);
+	LightComponent->SetLightColor(FLinearColor(ExitColor));
+
+	// Recheck occupants when intel or pursuit changes; no need to leave and re-enter the trigger.
+	if (bUnlocked && !bPursued)
+	{
+		AActor* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+		if (Player && TriggerComponent->IsOverlappingActor(Player))
+		{
+			if (AStealthGameMode* MutableGameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>())
+			{
+				MutableGameMode->TryCompleteMission(Player);
+			}
+		}
+	}
 }
 
 void AStealthExitZone::OnTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,

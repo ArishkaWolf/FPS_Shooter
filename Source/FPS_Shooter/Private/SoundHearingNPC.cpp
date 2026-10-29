@@ -9,7 +9,11 @@
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "NPCHearingComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Particles/ParticleSystem.h"
+#include "Sound/SoundBase.h"
 #include "StealthAIController.h"
+#include "StealthGameMode.h"
 #include "UObject/ConstructorHelpers.h"
 
 ASoundHearingNPC::ASoundHearingNPC()
@@ -19,11 +23,14 @@ ASoundHearingNPC::ASoundHearingNPC()
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 
 	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannyMesh(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Manny.SKM_Manny"));
 	if (MannyMesh.Succeeded())
 	{
 		GetMesh()->SetSkeletalMesh(MannyMesh.Object);
+		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		GetMesh()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	}
 
 	static ConstructorHelpers::FClassFinder<UAnimInstance> MannyAnimBlueprint(TEXT("/Game/Characters/Mannequins/Animations/ABP_Manny"));
@@ -54,6 +61,10 @@ ASoundHearingNPC::ASoundHearingNPC()
 	{
 		WeaponMesh->SetSkeletalMesh(RifleMesh.Object);
 	}
+	static ConstructorHelpers::FObjectFinder<USoundBase> RifleFireSound(TEXT("/Game/MilitaryWeapSilver/Sound/Rifle/Cues/RifleA_Fire_Cue.RifleA_Fire_Cue"));
+	FireSound = RifleFireSound.Object;
+	static ConstructorHelpers::FObjectFinder<UParticleSystem> RifleMuzzleFlash(TEXT("/Game/MilitaryWeapSilver/FX/P_AssaultRifle_MuzzleFlash.P_AssaultRifle_MuzzleFlash"));
+	MuzzleFlash = RifleMuzzleFlash.Object;
 
 	HearingComponent = CreateDefaultSubobject<UNPCHearingComponent>(TEXT("HearingComponent"));
 	HearingComponent->HearingRadius = 220.0f;
@@ -72,9 +83,51 @@ ASoundHearingNPC::ASoundHearingNPC()
 	CurrentHealth = MaxHealth;
 }
 
+void ASoundHearingNPC::FireWeaponAt(AActor* TargetActor)
+{
+	if (!IsValid(TargetActor) || !GetWorld())
+	{
+		return;
+	}
+	if (const AStealthGameMode* GameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>();
+		GameMode && (GameMode->GetMissionState() != EStealthMissionState::Playing || GameMode->IsActorProtected(TargetActor)))
+	{
+		return;
+	}
+
+	const FVector TraceStart = GetActorLocation() + FVector(0.0f, 0.0f, 70.0f);
+	const FVector TargetLocation = TargetActor->GetActorLocation() + FVector(0.0f, 0.0f, 45.0f);
+	const FVector ShotDirection = (TargetLocation - TraceStart).GetSafeNormal();
+	FHitResult Hit;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(GuardWeaponFire), true, this);
+	if (GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TargetLocation, ECC_Visibility, QueryParams) && Hit.GetActor())
+	{
+		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), FireDamage, ShotDirection, Hit,
+			GetController(), this, UDamageType::StaticClass());
+	}
+
+	if (MuzzleFlash)
+	{
+		UGameplayStatics::SpawnEmitterAttached(MuzzleFlash, WeaponMesh, TEXT("Muzzle"));
+	}
+	if (FireSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
+	}
+}
+
 float ASoundHearingNPC::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
 	AController* EventInstigator, AActor* DamageCauser)
 {
+	if (DamageAmount <= 0.0f || CurrentHealth <= 0.0f)
+	{
+		return 0.0f;
+	}
+	if (const AStealthGameMode* GameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>();
+		GameMode && GameMode->GetMissionState() != EStealthMissionState::Playing)
+	{
+		return 0.0f;
+	}
 	const float AppliedDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
 	CurrentHealth = FMath::Max(0.0f, CurrentHealth - AppliedDamage);
 	if (CurrentHealth <= 0.0f)
