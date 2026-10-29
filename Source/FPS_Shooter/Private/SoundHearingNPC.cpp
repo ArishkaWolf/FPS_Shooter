@@ -2,6 +2,7 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimationAsset.h"
+#include "Animation/AnimSequence.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/TextRenderComponent.h"
@@ -14,6 +15,7 @@
 #include "Sound/SoundBase.h"
 #include "StealthAIController.h"
 #include "StealthGameMode.h"
+#include "StealthNPCAnimInstance.h"
 #include "UObject/ConstructorHelpers.h"
 
 ASoundHearingNPC::ASoundHearingNPC()
@@ -21,6 +23,8 @@ ASoundHearingNPC::ASoundHearingNPC()
 	PrimaryActorTick.bCanEverTick = true;
 	AIControllerClass = AStealthAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+	// CharacterMovement applies the configured turn rate, including stationary search sweeps.
+	bUseControllerRotationYaw = false;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 	GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
@@ -33,17 +37,16 @@ ASoundHearingNPC::ASoundHearingNPC()
 		GetMesh()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	}
 
-	static ConstructorHelpers::FClassFinder<UAnimInstance> MannyAnimBlueprint(TEXT("/Game/Characters/Mannequins/Animations/ABP_Manny"));
-	if (MannyAnimBlueprint.Succeeded())
-	{
-		GetMesh()->SetAnimInstanceClass(MannyAnimBlueprint.Class);
-	}
-
-	static ConstructorHelpers::FClassFinder<UAnimInstance> RifleAnimBlueprint(TEXT("/Game/AnimStarterPack/UE5/UE5_UE4ASP_HeroTPP_AnimBlueprint"));
-	if (RifleAnimBlueprint.Succeeded())
-	{
-		GetMesh()->SetAnimInstanceClass(RifleAnimBlueprint.Class);
-	}
+	GetMesh()->SetAnimInstanceClass(UStealthNPCAnimInstance::StaticClass());
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> IdleClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Idle_Rifle_Hip"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> WalkClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Walk_Fwd_Rifle_Ironsights"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> RunClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Jog_Fwd_Rifle"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> FireClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Fire_Rifle_Hip"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> HitClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Hit_React_1"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> DeathClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Death_1"));
+	IdleAnimation = IdleClip.Object; WalkAnimation = WalkClip.Object; RunAnimation = RunClip.Object;
+	FireAnimation = FireClip.Object; HitAnimation = HitClip.Object; DeathAnimation = DeathClip.Object;
 
 	GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
 	GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
@@ -83,43 +86,63 @@ ASoundHearingNPC::ASoundHearingNPC()
 	CurrentHealth = MaxHealth;
 }
 
-void ASoundHearingNPC::FireWeaponAt(AActor* TargetActor)
+void ASoundHearingNPC::BeginPlay()
 {
-	if (!IsValid(TargetActor) || !GetWorld())
+	Super::BeginPlay();
+	CurrentHealth = FMath::Max(1.0f, MaxHealth);
+	// Calibrate in the actual rifle idle pose. Model +Y is the barrel direction.
+	GetMesh()->TickAnimation(0.0f, false);
+	GetMesh()->RefreshBoneTransforms();
+	const FTransform Hand = GetMesh()->GetSocketTransform(TEXT("hand_r"));
+	const FQuat Rotation = Hand.GetRotation().Inverse()
+		* FRotationMatrix::MakeFromYZ(GetActorForwardVector(), FVector::UpVector).ToQuat();
+	const FVector Grip = WeaponMesh->GetSocketTransform(TEXT("Grip_Bone"), RTS_Component).GetLocation();
+	WeaponMesh->SetRelativeTransform(FTransform(Rotation, -Rotation.RotateVector(Grip)));
+}
+
+bool ASoundHearingNPC::FireWeaponAt(AActor* TargetActor)
+{
+	if (bDead || !IsValid(TargetActor) || !GetWorld())
 	{
-		return;
+		return false;
 	}
 	if (const AStealthGameMode* GameMode = GetWorld()->GetAuthGameMode<AStealthGameMode>();
 		GameMode && (GameMode->GetMissionState() != EStealthMissionState::Playing || GameMode->IsActorProtected(TargetActor)))
 	{
-		return;
+		return false;
 	}
 
-	const FVector TraceStart = GetActorLocation() + FVector(0.0f, 0.0f, 70.0f);
+	const FVector TraceStart = WeaponMesh->DoesSocketExist(TEXT("MuzzleFlash"))
+		? WeaponMesh->GetSocketLocation(TEXT("MuzzleFlash")) : GetActorLocation() + FVector(0, 0, 70);
 	const FVector TargetLocation = TargetActor->GetActorLocation() + FVector(0.0f, 0.0f, 45.0f);
-	const FVector ShotDirection = (TargetLocation - TraceStart).GetSafeNormal();
+	if (FVector::DistSquared(GetActorLocation(), TargetActor->GetActorLocation()) > FMath::Square(WeaponRange)) { return false; }
+	LastShotAimDirection = (TargetLocation - TraceStart).GetSafeNormal();
+	LastShotDirection = FMath::VRandCone(LastShotAimDirection, FMath::DegreesToRadians(FMath::Clamp(FireSpreadDegrees, 0.0f, 12.0f)));
+	FireAnimationAge = 0.0f;
+	++ShotsFired;
 	FHitResult Hit;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(GuardWeaponFire), true, this);
-	if (GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TargetLocation, ECC_Visibility, QueryParams) && Hit.GetActor())
+	if (GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceStart + LastShotDirection * WeaponRange, ECC_Visibility, QueryParams) && Hit.GetActor())
 	{
-		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), FireDamage, ShotDirection, Hit,
+		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), FireDamage, LastShotDirection, Hit,
 			GetController(), this, UDamageType::StaticClass());
 	}
 
 	if (MuzzleFlash)
 	{
-		UGameplayStatics::SpawnEmitterAttached(MuzzleFlash, WeaponMesh, TEXT("Muzzle"));
+		UGameplayStatics::SpawnEmitterAttached(MuzzleFlash, WeaponMesh, TEXT("MuzzleFlash"));
 	}
 	if (FireSound)
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
 	}
+	return true;
 }
 
 float ASoundHearingNPC::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent,
 	AController* EventInstigator, AActor* DamageCauser)
 {
-	if (DamageAmount <= 0.0f || CurrentHealth <= 0.0f)
+	if (!FMath::IsFinite(DamageAmount) || DamageAmount <= 0.0f || bDead)
 	{
 		return 0.0f;
 	}
@@ -128,18 +151,55 @@ float ASoundHearingNPC::TakeDamage(float DamageAmount, FDamageEvent const& Damag
 	{
 		return 0.0f;
 	}
-	const float AppliedDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	const float AppliedDamage = FMath::Clamp(Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser), 0.0f, CurrentHealth);
 	CurrentHealth = FMath::Max(0.0f, CurrentHealth - AppliedDamage);
+	if (AppliedDamage <= 0.0f) { return 0.0f; }
+	HitAnimationAge = 0.0f;
 	if (CurrentHealth <= 0.0f)
 	{
-		Destroy();
+		Die();
+	}
+	else if (AStealthAIController* AI = Cast<AStealthAIController>(GetController()))
+	{
+		AI->ReactToDamage(EventInstigator && EventInstigator->GetPawn() ? EventInstigator->GetPawn() : DamageCauser);
 	}
 	return AppliedDamage;
+}
+
+void ASoundHearingNPC::Die()
+{
+	bDead = true;
+	DeathAnimationAge = 0.0f;
+	GetCharacterMovement()->StopMovementImmediately();
+	GetCharacterMovement()->DisableMovement();
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HearingComponent->ClearSoundMemory();
+	HearingComponent->Deactivate();
+	HearingComponent->SetComponentTickEnabled(false);
+	SoundLabel->SetText(NSLOCTEXT("StealthAI", "Dead", "DOWN"));
+	SoundLabel->SetTextRenderColor(FColor::Silver);
+	if (AStealthAIController* AI = Cast<AStealthAIController>(GetController()))
+	{
+		AI->StopForDeath();
+		AI->UnPossess();
+		AI->SetLifeSpan(2.0f);
+	}
+	// Leave the final death pose visible; the corpse never blocks navigation or extraction.
+	SetActorEnableCollision(false);
+	SetLifeSpan(35.0f);
 }
 
 void ASoundHearingNPC::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	FireAnimationAge += DeltaSeconds;
+	HitAnimationAge += DeltaSeconds;
+	if (bDead)
+	{
+		DeathAnimationAge += DeltaSeconds;
+		return;
+	}
 
 	if (!HearingComponent || !SoundLabel)
 	{
