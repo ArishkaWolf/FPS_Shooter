@@ -11,7 +11,11 @@ public class FPS_Shooter : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			"InputCore"
+			"InputCore",
+			"EnhancedInput",
+			"AIModule",
+			"NavigationSystem"
 		});
+		PrivateDependencyModuleNames.Add("AnimationCore");
 	}
 }

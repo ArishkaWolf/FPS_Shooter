@@ -36,6 +36,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category="Hearing")
 	float LastReceivedSoundStrength = 0.0f;
 
+	UPROPERTY(BlueprintReadOnly, Category="Hearing")
+	int32 HearingEventId = 0;
+
 	UFUNCTION(BlueprintCallable, Category="Hearing")
 	void HearSoundAtLocation(const FVector& SoundLocation, float Strength);
 

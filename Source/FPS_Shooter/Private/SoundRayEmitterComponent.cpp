@@ -62,12 +62,13 @@ void USoundRayEmitterComponent::EmitFootstepSound()
 
 	const FVector Origin = Owner->GetActorLocation();
 	const FVector Forward = Owner->GetActorForwardVector().GetSafeNormal();
+	const float OwnerYawDegrees = Owner->GetActorRotation().Yaw;
 	const int32 ClampedRayCount = FMath::Max(1, RayCount);
 	const int32 RaysToEmit = bDirectionalSound ? 1 : ClampedRayCount;
 
 	for (int32 RayIndex = 0; RayIndex < RaysToEmit; ++RayIndex)
 	{
-		const float AngleDegrees = 360.0f * static_cast<float>(RayIndex) / static_cast<float>(ClampedRayCount);
+		const float AngleDegrees = OwnerYawDegrees + 360.0f * static_cast<float>(RayIndex) / static_cast<float>(ClampedRayCount);
 		const FVector FlatDirection = bDirectionalSound
 			? Forward
 			: FVector(FMath::Cos(FMath::DegreesToRadians(AngleDegrees)), FMath::Sin(FMath::DegreesToRadians(AngleDegrees)), 0.0f);
