@@ -8,6 +8,9 @@ UNPCHearingComponent::UNPCHearingComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	bAutoActivate = true;
+	TypePriorityWeights = { { ESoundEventType::Footstep, 1.0f }, { ESoundEventType::Landing, 1.25f },
+		{ ESoundEventType::Gunshot, 2.5f }, { ESoundEventType::ThrownObject, 1.5f },
+		{ ESoundEventType::Door, 1.2f }, { ESoundEventType::Interaction, 0.8f } };
 }
 
 void UNPCHearingComponent::BeginPlay()
@@ -35,10 +38,10 @@ void UNPCHearingComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	{
 		Sound.Age += DeltaTime;
 	}
-	SoundMemory.RemoveAll([this](const FNPCHearingStimulus& Sound) { return Sound.Age >= GetMemoryDuration(); });
+	SoundMemory.RemoveAll([this](const FNPCHearingStimulus& Sound) { return Sound.Age >= GetMemoryDuration(Sound); });
 	RefreshBestSound();
 
-	if (bDrawDebug && GetWorld() && HasHeardSound())
+	if (IsSoundRayDebugEnabled() && GetWorld() && HasHeardSound())
 	{
 		const FVector OwnerLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
 		const FVector DebugLocation = OwnerLocation + FVector(0.0f, 0.0f, 120.0f);
@@ -55,24 +58,52 @@ void UNPCHearingComponent::HearSoundAtLocation(const FVector& SoundLocation, flo
 		return;
 	}
 
-	Strength = FMath::Clamp(Strength, 0.0f, 2.0f);
-	// Combine nearby rays in one propagation burst without extending its lifetime.
+	FNPCHearingStimulus Sound;
+	Sound.Location = SoundLocation;
+	Sound.Strength = FMath::Clamp(Strength, 0.0f, 2.0f);
+	Sound.Event.Strength = Sound.Event.EmittedStrength = Sound.Strength;
+	Sound.Event.SourceLocation = Sound.Event.HeardLocation = Sound.Event.ArrivalLocation = SoundLocation;
+	Sound.Event.TimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	StoreSound(Sound);
+}
+
+void UNPCHearingComponent::HearSoundEvent(const FSoundRayEvent& Event)
+{
+	if (!IsActive() || !Event.EventId.IsValid() || !FMath::IsFinite(Event.Strength) || Event.Strength <= 0.0f
+		|| !FMath::IsFinite(Event.TimeSeconds) || Event.SourceLocation.ContainsNaN() || Event.HeardLocation.ContainsNaN()) { return; }
+	FNPCHearingStimulus Sound;
+	Sound.Location = Event.HeardLocation;
+	Sound.Strength = FMath::Clamp(Event.Strength, 0.0f, 2.0f);
+	Sound.Age = GetWorld() ? FMath::Max(0.0, GetWorld()->GetTimeSeconds() - Event.TimeSeconds) : 0.0f;
+	Sound.Event = Event;
+	Sound.Event.Strength = Sound.Strength;
+	Sound.MemoryDuration = FMath::IsFinite(Event.MemoryDuration) && Event.MemoryDuration > KINDA_SMALL_NUMBER
+		? Event.MemoryDuration : GetMemoryDuration();
+	if (Sound.Age < Sound.MemoryDuration) { StoreSound(Sound); }
+}
+
+void UNPCHearingComponent::StoreSound(FNPCHearingStimulus Incoming)
+{
+	// Typed reflections share an emission identity; separate sources/types never coalesce.
 	FNPCHearingStimulus* Existing = SoundMemory.FindByPredicate([&](const FNPCHearingStimulus& Sound)
 	{
-		return Sound.Age < 0.3f && FVector::DistSquared(Sound.Location, SoundLocation) < FMath::Square(100.0f);
+		if (Incoming.Event.EventId.IsValid()) { return Sound.Event.EventId == Incoming.Event.EventId; }
+		return !Sound.Event.EventId.IsValid() && Sound.Age < 0.3f
+			&& FVector::DistSquared(Sound.Location, Incoming.Location) < FMath::Square(100.0f);
 	});
 	if (Existing)
 	{
-		if (Strength > Existing->Strength)
+		if (Incoming.Strength > Existing->Strength)
 		{
-			Existing->Strength = Strength;
-			Existing->Location = SoundLocation;
-			Existing->Id = ++HearingEventId;
+			Incoming.Age = FMath::Max(Incoming.Age, Existing->Age);
+			Incoming.Id = ++HearingEventId;
+			*Existing = Incoming;
 		}
 	}
 	else
 	{
-		SoundMemory.Add({ SoundLocation, Strength, 0.0f, ++HearingEventId });
+		Incoming.Id = ++HearingEventId;
+		SoundMemory.Add(Incoming);
 	}
 	if (SoundMemory.Num() > 16)
 	{
@@ -85,7 +116,7 @@ void UNPCHearingComponent::HearSoundAtLocation(const FVector& SoundLocation, flo
 	}
 	RefreshBestSound();
 
-	if (bDrawDebug && GetWorld())
+	if (IsSoundRayDebugEnabled() && GetWorld())
 	{
 		const FVector OwnerLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
 		DrawDebugSphere(GetWorld(), OwnerLocation + FVector(0.0f, 0.0f, 120.0f), 60.0f, 20, FColor::Green, false, 0.6f, 0, 3.0f);
@@ -98,11 +129,18 @@ float UNPCHearingComponent::GetMemoryDuration() const
 		: ForgetSpeed > KINDA_SMALL_NUMBER ? 1.0f / ForgetSpeed : 60.0f;
 }
 
+float UNPCHearingComponent::GetMemoryDuration(const FNPCHearingStimulus& Sound) const
+{
+	return Sound.MemoryDuration > KINDA_SMALL_NUMBER ? Sound.MemoryDuration : GetMemoryDuration();
+}
+
 float UNPCHearingComponent::GetSoundPriority(const FNPCHearingStimulus& Sound) const
 {
-	const float Distance = GetOwner() ? FVector::Dist(GetOwner()->GetActorLocation(), Sound.Location) : 0.0f;
-	const float Freshness = FMath::Square(FMath::Clamp(1.0f - Sound.Age / GetMemoryDuration(), 0.0f, 1.0f));
-	return Sound.Strength * Freshness / (1.0f + Distance / 1200.0f);
+	const FVector Position = Sound.Event.EventId.IsValid() ? Sound.Event.SourceLocation : Sound.Location;
+	const float Distance = GetOwner() ? FVector::Dist(GetOwner()->GetActorLocation(), Position) : 0.0f;
+	const float Freshness = FMath::Square(FMath::Clamp(1.0f - Sound.Age / GetMemoryDuration(Sound), 0.0f, 1.0f));
+	const float* TypeWeight = TypePriorityWeights.Find(Sound.Event.Type);
+	return Sound.Strength * (TypeWeight ? FMath::Max(0.0f, *TypeWeight) : 1.0f) * Freshness / (1.0f + Distance / 1200.0f);
 }
 
 bool UNPCHearingComponent::GetBestSound(FNPCHearingStimulus& OutSound) const
@@ -129,12 +167,14 @@ void UNPCHearingComponent::RefreshBestSound()
 	{
 		LastHeardPosition = Best.Location;
 		LastReceivedSoundStrength = Best.Strength;
-		CurrentSoundStrength = Best.Strength * FMath::Clamp(1.0f - Best.Age / GetMemoryDuration(), 0.0f, 1.0f);
+		LastHeardEvent = Best.Event;
+		CurrentSoundStrength = Best.Strength * FMath::Clamp(1.0f - Best.Age / GetMemoryDuration(Best), 0.0f, 1.0f);
 	}
 	else
 	{
 		CurrentSoundStrength = 0.0f;
 		LastReceivedSoundStrength = 0.0f;
+		LastHeardEvent = FSoundRayEvent();
 	}
 }
 

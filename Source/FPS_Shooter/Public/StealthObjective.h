@@ -9,6 +9,7 @@ class UPointLightComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class USoundRayInteractionComponent;
 
 UCLASS()
 class FPS_SHOOTER_API AStealthObjective : public AActor, public IStealthInteractable
@@ -20,6 +21,8 @@ public:
 	virtual void Interact_Implementation(AStealthCharacter* InteractingCharacter) override;
 
 private:
+	UPROPERTY(VisibleAnywhere, Category="Components")
+	TObjectPtr<USoundRayInteractionComponent> SoundEmitter;
 	UPROPERTY(VisibleAnywhere, Category="Components")
 	TObjectPtr<USphereComponent> CollisionComponent;
 

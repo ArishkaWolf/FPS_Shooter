@@ -10,6 +10,7 @@ class USkeletalMeshComponent;
 class USoundBase;
 class UTextRenderComponent;
 class UAnimSequence;
+class USoundRayEmitterComponent;
 
 UCLASS()
 class FPS_SHOOTER_API ASoundHearingNPC : public ACharacter
@@ -40,6 +41,9 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UNPCHearingComponent> HearingComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
+	TObjectPtr<USoundRayEmitterComponent> SoundEmitter;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	TObjectPtr<UTextRenderComponent> SoundLabel;
