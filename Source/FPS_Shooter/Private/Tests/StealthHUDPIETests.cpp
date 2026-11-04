@@ -103,6 +103,10 @@ public:
 			UGameplayStatics::ApplyDamage(Player, 1000, nullptr, nullptr, UDamageType::StaticClass());
 			Test.TestEqual(TEXT("Defeat shows the mission result"), Mission->GetMissionState(), EStealthMissionState::Lost);
 		}
+		else if (Stage == 2 && !Mission->IsMissionResultReady())
+		{
+			return false;
+		}
 		else
 		{
 			const double Scale = FMath::Min(Size.X / 960.0, Size.Y / 540.0);

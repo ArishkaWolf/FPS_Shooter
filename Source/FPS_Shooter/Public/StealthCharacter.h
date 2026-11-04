@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
+#include "StealthBallistics.h"
 #include "StealthCharacter.generated.h"
 
 class AFallingSoundSphere;
@@ -51,6 +52,8 @@ public:
 	UFUNCTION(BlueprintPure, Category="Combat")
 	float GetHealth() const { return CurrentHealth; }
 	float GetHealthFraction() const { return FMath::Clamp(CurrentHealth / FMath::Max(MaxHealth, 1.0f), 0.0f, 1.0f); }
+	float GetHitFeedback() const { return HitFeedback; }
+	static constexpr float DeathPresentationDuration = 0.45f;
 	FText GetInteractionPrompt() const;
 	void StopMissionActions();
 	bool CanPerformMissionAction() const;
@@ -159,6 +162,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0.0"))
 	float WeaponRange = 10000.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon", meta=(ClampMin="0.0", ClampMax="12.0"))
+	float HipSpreadDegrees = 1.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Weapon|Aim", meta=(ClampMin="0.0", ClampMax="12.0"))
+	float AimSpreadDegrees = 0.28f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat", meta=(ClampMin="1.0"))
 	float MaxHealth = 100.0f;
 
@@ -230,6 +239,9 @@ protected:
 	TObjectPtr<UParticleSystem> MuzzleFlash;
 
 private:
+	UPROPERTY()
+	FStealthImpactEffects ImpactEffects;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> InputMappingContext;
 
@@ -278,6 +290,10 @@ private:
 	float FireAnimationTimeRemaining = 0.0f;
 	int32 AmmoInMagazine = 0;
 	float CurrentHealth = 100.0f;
+	float HitFeedback = 0.0f;
+	float DeathElapsed = 0.0f;
+	FRotator DeathCameraStart;
+	FVector DeathArmsStart;
 
 	void CreateInputMapping();
 	void ApplyInputMapping();
@@ -301,4 +317,5 @@ private:
 	void UpdateFirstPersonPose(float DeltaSeconds);
 	void UpdateMovementState();
 	void UpdateFirstPersonAnimation(float DeltaSeconds);
+	void UpdateDeathPose(float DeltaSeconds);
 };

@@ -34,12 +34,10 @@ ASoundHearingNPC::ASoundHearingNPC()
 	if (MannyMesh.Succeeded())
 	{
 		GetMesh()->SetSkeletalMesh(MannyMesh.Object);
-		GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-		GetMesh()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		StealthBallistics::ConfigureMannequinHitMesh(*GetMesh());
 	}
 
 	GetMesh()->SetAnimInstanceClass(UStealthNPCAnimInstance::StaticClass());
-	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> IdleClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Idle_Rifle_Hip"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> WalkClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Walk_Fwd_Rifle_Ironsights"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> RunClip(TEXT("/Game/AnimStarterPack/UE5/UE5_Jog_Fwd_Rifle"));
@@ -69,6 +67,7 @@ ASoundHearingNPC::ASoundHearingNPC()
 	FireSound = RifleFireSound.Object;
 	static ConstructorHelpers::FObjectFinder<UParticleSystem> RifleMuzzleFlash(TEXT("/Game/MilitaryWeapSilver/FX/P_AssaultRifle_MuzzleFlash.P_AssaultRifle_MuzzleFlash"));
 	MuzzleFlash = RifleMuzzleFlash.Object;
+	ImpactEffects.LoadDefaults();
 
 	HearingComponent = CreateDefaultSubobject<UNPCHearingComponent>(TEXT("HearingComponent"));
 	HearingComponent->HearingRadius = 220.0f;
@@ -120,22 +119,19 @@ bool ASoundHearingNPC::FireWeaponAt(AActor* TargetActor)
 		return false;
 	}
 
-	const FVector TraceStart = WeaponMesh->DoesSocketExist(TEXT("MuzzleFlash"))
-		? WeaponMesh->GetSocketLocation(TEXT("MuzzleFlash")) : GetActorLocation() + FVector(0, 0, 70);
-	const FVector TargetLocation = TargetActor->GetActorLocation() + FVector(0.0f, 0.0f, 45.0f);
 	if (FVector::DistSquared(GetActorLocation(), TargetActor->GetActorLocation()) > FMath::Square(WeaponRange)) { return false; }
-	LastShotAimDirection = (TargetLocation - TraceStart).GetSafeNormal();
+	const FVector Chest = GetMesh()->GetSocketLocation(TEXT("spine_04"));
+	const FVector Muzzle = WeaponMesh->DoesSocketExist(TEXT("MuzzleFlash"))
+		? WeaponMesh->GetSocketLocation(TEXT("MuzzleFlash")) : Chest;
+	const ACharacter* Target = Cast<ACharacter>(TargetActor);
+	const FVector TargetLocation = Target && Target->GetMesh()->DoesSocketExist(TEXT("spine_04"))
+		? Target->GetMesh()->GetSocketLocation(TEXT("spine_04")) : TargetActor->GetActorLocation();
+	LastShotAimDirection = (TargetLocation - Muzzle).GetSafeNormal();
 	LastShotDirection = FMath::VRandCone(LastShotAimDirection, FMath::DegreesToRadians(FMath::Clamp(FireSpreadDegrees, 0.0f, 12.0f)));
 	FireAnimationAge = 0.0f;
 	++ShotsFired;
-	SoundEmitter->EmitSoundEventAtLocation(ESoundEventType::Gunshot, TraceStart, -1.0f, -1.0f, this);
-	FHitResult Hit;
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(GuardWeaponFire), true, this);
-	if (GetWorld()->LineTraceSingleByChannel(Hit, TraceStart, TraceStart + LastShotDirection * WeaponRange, ECC_Visibility, QueryParams) && Hit.GetActor())
-	{
-		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), FireDamage, LastShotDirection, Hit,
-			GetController(), this, UDamageType::StaticClass());
-	}
+	SoundEmitter->EmitSoundEventAtLocation(ESoundEventType::Gunshot, Muzzle, -1.0f, -1.0f, this);
+	StealthBallistics::Fire(*this, Chest, Muzzle, Muzzle, LastShotDirection, WeaponRange, FireDamage, ImpactEffects);
 
 	if (MuzzleFlash)
 	{
@@ -143,7 +139,7 @@ bool ASoundHearingNPC::FireWeaponAt(AActor* TargetActor)
 	}
 	if (FireSound)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, FireSound, GetActorLocation());
+		UGameplayStatics::PlaySoundAtLocation(this, FireSound, Muzzle);
 	}
 	return true;
 }

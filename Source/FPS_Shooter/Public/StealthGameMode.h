@@ -65,6 +65,7 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Mission")
 	EStealthMissionState GetMissionState() const { return MissionState; }
+	bool IsMissionResultReady() const { return bMissionResultReady; }
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category="Mission", meta=(ClampMin="100.0"))
@@ -74,6 +75,7 @@ private:
 	bool bSafeZoneInitialized = false;
 	bool bInfiltrationStarted = false;
 	bool bRestartRequested = false;
+	bool bMissionResultReady = false;
 	float MissionTime = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, Category="Mission")
@@ -84,4 +86,5 @@ private:
 
 	bool IsMissionPlayer(const AActor* Actor) const;
 	void FinishMission(EStealthMissionState NewState);
+	void ShowMissionResult();
 };

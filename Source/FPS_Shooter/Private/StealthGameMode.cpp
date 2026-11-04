@@ -7,6 +7,7 @@
 #include "StealthCharacter.h"
 #include "StealthHUD.h"
 #include "StealthPlayerController.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogStealthMission, Log, All);
 
@@ -188,7 +189,8 @@ void AStealthGameMode::FinishMission(EStealthMissionState NewState)
 	MissionState = NewState;
 	UE_LOG(LogStealthMission, Display, TEXT("Mission %s after %.1f seconds."),
 		NewState == EStealthMissionState::Won ? TEXT("WON") : TEXT("LOST"), MissionTime);
-	if (AStealthCharacter* Player = Cast<AStealthCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)))
+	if (AStealthCharacter* Player = Cast<AStealthCharacter>(UGameplayStatics::GetPlayerPawn(this, 0));
+		Player && NewState == EStealthMissionState::Won)
 	{
 		Player->StopMissionActions();
 	}
@@ -197,6 +199,20 @@ void AStealthGameMode::FinishMission(EStealthMissionState NewState)
 		It->StopMovement();
 		It->ClearFocus(EAIFocusPriority::Gameplay);
 	}
+	if (NewState == EStealthMissionState::Lost)
+	{
+		FTimerHandle Presentation;
+		GetWorldTimerManager().SetTimer(Presentation, this, &AStealthGameMode::ShowMissionResult,
+			AStealthCharacter::DeathPresentationDuration, false);
+		return;
+	}
+	ShowMissionResult();
+}
+
+void AStealthGameMode::ShowMissionResult()
+{
+	if (bRestartRequested) { return; }
+	bMissionResultReady = true;
 	if (AStealthPlayerController* PC = Cast<AStealthPlayerController>(GetWorld()->GetFirstPlayerController()))
 	{
 		PC->ShowMissionResult();
