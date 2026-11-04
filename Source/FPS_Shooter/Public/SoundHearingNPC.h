@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "StealthBallistics.h"
 #include "SoundHearingNPC.generated.h"
 
 class UNPCHearingComponent;
@@ -102,6 +103,9 @@ protected:
 	TObjectPtr<UAnimSequence> DeathAnimation;
 
 private:
+	UPROPERTY()
+	FStealthImpactEffects ImpactEffects;
+
 	float CurrentHealth = 100.0f;
 	bool bDead = false;
 	int32 ShotsFired = 0;

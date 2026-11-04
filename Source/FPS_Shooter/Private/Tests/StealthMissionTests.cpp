@@ -272,6 +272,18 @@ public:
 		{
 			return true;
 		}
+		if (bAwaitingDefeatResult)
+		{
+			if (!Mission->IsMissionResultReady()) { return false; }
+			Test->TestTrue(TEXT("Result pauses the world"), UGameplayStatics::IsGamePaused(World));
+			Test->TestTrue(TEXT("Result reveals mouse cursor"), PC->bShowMouseCursor);
+			PreviousWorld = World;
+			CastChecked<AStealthHUD>(PC->GetHUD())->NotifyHitBoxClick(TEXT("RestartMission"));
+			bAwaitingDefeatResult = false;
+			++Stage;
+			StageStarted = FPlatformTime::Seconds();
+			return false;
+		}
 		Test->TestEqual(TEXT("Reload starts a fresh mission"), Mission->GetMissionState(), EStealthMissionState::Playing);
 		Test->TestEqual(TEXT("Reload restores health"), Player->GetHealth(), 100.0f);
 		Test->TestEqual(TEXT("Reload restores magazine"), Player->GetAmmoInMagazine(), 30);
@@ -314,10 +326,9 @@ public:
 			Mission->Tick(0.1f);
 			UGameplayStatics::ApplyDamage(Player, 1000, nullptr, nullptr, UDamageType::StaticClass());
 			Test->TestEqual(TEXT("Actual level reaches defeat"), Mission->GetMissionState(), EStealthMissionState::Lost);
-			Test->TestTrue(TEXT("Result pauses the world"), UGameplayStatics::IsGamePaused(World));
-			Test->TestTrue(TEXT("Result reveals mouse cursor"), PC->bShowMouseCursor);
-			PreviousWorld = World;
-			HUD->NotifyHitBoxClick(TEXT("RestartMission"));
+			Test->TestFalse(TEXT("First-person death pose starts before the result"), Mission->IsMissionResultReady());
+			bAwaitingDefeatResult = true;
+			return false;
 		}
 		else if (Stage == 1)
 		{
@@ -369,6 +380,7 @@ private:
 	FAutomationTestBase* Test;
 	TWeakObjectPtr<UWorld> PreviousWorld;
 	int32 Stage = 0;
+	bool bAwaitingDefeatResult = false;
 	double StageStarted = FPlatformTime::Seconds();
 };
 

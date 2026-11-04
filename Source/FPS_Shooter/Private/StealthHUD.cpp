@@ -90,12 +90,18 @@ void AStealthHUD::DrawHUD()
 	const AStealthGameMode* Mission = GetWorld()->GetAuthGameMode<AStealthGameMode>();
 	if (Mission && Mission->GetMissionState() != EStealthMissionState::Playing)
 	{
-		DrawMissionResult(*Mission);
+		if (Mission->IsMissionResultReady()) { DrawMissionResult(*Mission); }
 		return;
 	}
 
-	DrawGuardIndicators();
 	const FStealthCanvas UI(*this, *Canvas);
+	const AStealthCharacter* Character = Cast<AStealthCharacter>(GetOwningPawn());
+	if (Character && Character->GetHitFeedback() > 0.0f)
+	{
+		const float Strength = Character->GetHitFeedback();
+		UI.Box(FLinearColor(0.55f, 0.04f, 0.03f, 0.14f * Strength), FVector2D::ZeroVector, UI.Size);
+	}
+	DrawGuardIndicators();
 	const FVector2D Center = UI.Size * 0.5;
 	constexpr float Margin = 22.0f;
 	if (Mission)
@@ -115,7 +121,6 @@ void AStealthHUD::DrawHUD()
 			Stage == EStealthMissionStage::Evade ? Red : Amber);
 	}
 
-	const AStealthCharacter* Character = Cast<AStealthCharacter>(GetOwningPawn());
 	if (!Character) { return; }
 
 	const FString Prompt = Character->GetInteractionPrompt().ToString();
