@@ -57,10 +57,15 @@ public:
 			UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
 			FVector Origin, Start;
 			bool bFound = false;
-			// Find a real open region of the authored level, rather than assuming empty space.
-			for (float X = 500; X <= 2500 && !bFound; X += 500)
+			FVector Clearing = FVector::ZeroVector;
+			for (TActorIterator<AActor> It(World); It; ++It)
 			{
-				for (float Y = 500; Y <= 2500 && !bFound; Y += 500)
+				if (It->ActorHasTag(TEXT("Greybox.QA.Search"))) { Clearing = It->GetActorLocation(); break; }
+			}
+			if (Clearing.IsNearlyZero()) { Test->AddError(TEXT("Missing navigation search clearing")); return true; }
+			for (float X = Clearing.X - 600; X <= Clearing.X + 600 && !bFound; X += 300)
+			{
+				for (float Y = Clearing.Y - 500; Y <= Clearing.Y + 500 && !bFound; Y += 250)
 				{
 					FNavLocation Center, Begin;
 					if (!Nav || !Nav->ProjectPointToNavigation(FVector(X, Y, 150), Center, FVector(100, 100, 600))

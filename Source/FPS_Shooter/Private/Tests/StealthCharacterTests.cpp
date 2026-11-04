@@ -71,7 +71,12 @@ public:
 				It->GetCharacterMovement()->DisableMovement();
 				if (AController* AI = It->GetController()) { AI->SetActorTickEnabled(false); }
 			}
-			Player->SetActorLocation(FVector(1400, 1110, 100));
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if (It->ActorHasTag(TEXT("Greybox.QA.Movement"))) { MovementClearing = It->GetActorLocation(); break; }
+			}
+			if (MovementClearing.IsNearlyZero()) { Test->AddError(TEXT("Missing input test clearing")); return true; }
+			Player->SetActorLocation(MovementClearing);
 			PC->SetControlRotation(FRotator::ZeroRotator);
 			Mission->Tick(0.01f);
 			Test->TestTrue(TEXT("First-person camera remains active"), Camera->IsActive() && Player->GetMesh()->bOwnerNoSee);
@@ -182,7 +187,7 @@ public:
 			Tap(EKeys::E);
 			Test->TestTrue(TEXT("E still interacts using the first-person camera trace"), Mission->HasObjective());
 			PC->SetControlRotation(FRotator::ZeroRotator);
-			Player->SetActorLocation(FVector(1000, 1300, 220));
+			Player->SetActorLocation(MovementClearing + FVector(0, 0, 120));
 			Player->GetCharacterMovement()->Velocity = FVector::ZeroVector;
 			Player->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
 			Delay = 0.8f;
@@ -193,7 +198,7 @@ public:
 			SoftLanding = Player->GetLastLandingStrength();
 			Test->TestTrue(TEXT("A fall generates a landing impact"), SoftLanding > 0.0f);
 			Test->TestEqual(TEXT("Physical fall emits Landing event"), Player->GetSoundEmitter()->GetLastEmittedEvent().Type, ESoundEventType::Landing);
-			Player->SetActorLocation(FVector(1000, 1300, 1200));
+			Player->SetActorLocation(MovementClearing + FVector(0, 0, 1100));
 			Player->GetCharacterMovement()->Velocity = FVector::ZeroVector;
 			Player->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
 			Delay = 1.8f;
@@ -214,6 +219,7 @@ public:
 private:
 	FAutomationTestBase* Test;
 	int32 Stage = 0;
+	FVector MovementClearing = FVector::ZeroVector;
 	int32 AmmoBeforeReload = 30;
 	float SoftLanding = 0.0f;
 	float StageStarted = 0.0f;
