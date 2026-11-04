@@ -39,3 +39,8 @@ void ANoiseMakerPickup::Interact_Implementation(AStealthCharacter* InteractingCh
 	SoundEmitter->NotifyInteraction(InteractingCharacter);
 	Destroy();
 }
+
+FText ANoiseMakerPickup::GetInteractionPrompt_Implementation() const
+{
+	return FText::Format(NSLOCTEXT("StealthUI", "TakeNoiseMakers", "Take noise makers (+{0})"), FText::AsNumber(Amount));
+}

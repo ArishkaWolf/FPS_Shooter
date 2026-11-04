@@ -19,6 +19,7 @@ class FPS_SHOOTER_API AStealthObjective : public AActor, public IStealthInteract
 public:
 	AStealthObjective();
 	virtual void Interact_Implementation(AStealthCharacter* InteractingCharacter) override;
+	virtual FText GetInteractionPrompt_Implementation() const override;
 
 private:
 	UPROPERTY(VisibleAnywhere, Category="Components")

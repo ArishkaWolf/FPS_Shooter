@@ -345,6 +345,20 @@ void AStealthCharacter::Interact()
 		return;
 	}
 	CancelReload();
+	if (AActor* Target = FindInteractionTarget())
+	{
+		IStealthInteractable::Execute_Interact(Target, this);
+	}
+}
+
+FText AStealthCharacter::GetInteractionPrompt() const
+{
+	AActor* Target = CanPerformMissionAction() ? FindInteractionTarget() : nullptr;
+	return Target ? IStealthInteractable::Execute_GetInteractionPrompt(Target) : FText::GetEmpty();
+}
+
+AActor* AStealthCharacter::FindInteractionTarget() const
+{
 	FHitResult Hit;
 	const FVector Start = FollowCamera->GetComponentLocation();
 	const FVector End = Start + FollowCamera->GetForwardVector() * InteractionDistance;
@@ -354,8 +368,9 @@ void AStealthCharacter::Interact()
 		&& Hit.GetActor()
 		&& Hit.GetActor()->Implements<UStealthInteractable>())
 	{
-		IStealthInteractable::Execute_Interact(Hit.GetActor(), this);
+		return Hit.GetActor();
 	}
+	return nullptr;
 }
 
 void AStealthCharacter::ThrowNoiseMaker()

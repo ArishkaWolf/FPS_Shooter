@@ -112,13 +112,13 @@ FString AStealthGameMode::GetObjectiveText() const
 	switch (GetMissionStage())
 	{
 	case EStealthMissionStage::SafeZone:
-		return FString::Printf(TEXT("SAFE START - Leave the %.1fm staging area. Steal INTEL [E], then reach EXIT."), SafeZoneRadius / 100.0f);
+		return TEXT("Leave the safe area");
 	case EStealthMissionStage::Evade:
-		return TEXT("BREAK CONTACT - Hide behind cover until the guards finish searching.");
+		return TEXT("Break line of sight and hide");
 	case EStealthMissionStage::Extraction:
-		return TEXT("INTEL SECURED - Reach the green EXIT to extract.");
+		return TEXT("Reach the extraction zone");
 	default:
-		return TEXT("INFILTRATE - Find yellow INTEL. Aim at it and press [E] to collect.");
+		return TEXT("Infiltrate and collect the intel");
 	}
 }
 

@@ -55,3 +55,8 @@ void AStealthObjective::Interact_Implementation(AStealthCharacter* InteractingCh
 		Destroy();
 	}
 }
+
+FText AStealthObjective::GetInteractionPrompt_Implementation() const
+{
+	return NSLOCTEXT("StealthUI", "CollectIntel", "Collect intel");
+}
