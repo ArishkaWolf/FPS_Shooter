@@ -16,6 +16,7 @@ public:
 	AStealthDoor();
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void Interact_Implementation(AStealthCharacter* InteractingCharacter) override;
+	virtual FText GetInteractionPrompt_Implementation() const override;
 	UFUNCTION(BlueprintCallable, Category="Door")
 	bool SetOpen(bool bOpen, AActor* Initiator);
 	UFUNCTION(BlueprintPure, Category="Door")

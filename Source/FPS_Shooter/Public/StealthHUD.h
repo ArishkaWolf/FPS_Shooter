@@ -4,6 +4,8 @@
 #include "GameFramework/HUD.h"
 #include "StealthHUD.generated.h"
 
+class AStealthGameMode;
+
 UCLASS()
 class FPS_SHOOTER_API AStealthHUD : public AHUD
 {
@@ -14,5 +16,6 @@ public:
 	virtual void NotifyHitBoxClick(FName BoxName) override;
 
 private:
-	void DrawMissionResult();
+	void DrawGuardIndicators();
+	void DrawMissionResult(const AStealthGameMode& Mission);
 };

@@ -31,6 +31,12 @@ void AStealthDoor::Interact_Implementation(AStealthCharacter* InteractingCharact
 	}
 }
 
+FText AStealthDoor::GetInteractionPrompt_Implementation() const
+{
+	return bIsOpen ? NSLOCTEXT("StealthUI", "CloseDoor", "Close door")
+		: NSLOCTEXT("StealthUI", "OpenDoor", "Open door");
+}
+
 bool AStealthDoor::SetOpen(bool bOpen, AActor* Initiator)
 {
 	if (bIsOpen == bOpen) { return false; }

@@ -19,4 +19,8 @@ class FPS_SHOOTER_API IStealthInteractable
 public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Interaction")
 	void Interact(AStealthCharacter* InteractingCharacter);
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category="Interaction")
+	FText GetInteractionPrompt() const;
+	virtual FText GetInteractionPrompt_Implementation() const { return NSLOCTEXT("StealthUI", "Interact", "Interact"); }
 };

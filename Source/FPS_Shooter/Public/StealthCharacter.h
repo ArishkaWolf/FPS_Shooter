@@ -50,6 +50,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Combat")
 	float GetHealth() const { return CurrentHealth; }
+	float GetHealthFraction() const { return FMath::Clamp(CurrentHealth / FMath::Max(MaxHealth, 1.0f), 0.0f, 1.0f); }
+	FText GetInteractionPrompt() const;
 	void StopMissionActions();
 	bool CanPerformMissionAction() const;
 
@@ -285,6 +287,7 @@ private:
 	void StopSprint();
 	void ToggleCrouch();
 	void Interact();
+	AActor* FindInteractionTarget() const;
 	void ThrowNoiseMaker();
 	void StartFire();
 	void StopFire();

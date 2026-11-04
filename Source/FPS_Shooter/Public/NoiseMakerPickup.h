@@ -18,6 +18,7 @@ public:
 	ANoiseMakerPickup();
 
 	virtual void Interact_Implementation(AStealthCharacter* InteractingCharacter) override;
+	virtual FText GetInteractionPrompt_Implementation() const override;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
